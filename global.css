@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Leakify light theme — clean background, white cards, midnight-navy text */
+    --background: 210 40% 98%; /* #F8FAFC */
+    --foreground: 220 43% 11%; /* #101828 */
+    --card: 0 0% 100%; /* #FFFFFF */
+    --card-foreground: 220 43% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 43% 11%;
+    --primary: 142 76% 36%; /* #16A34A */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 94%; /* #EEF2F6-ish */
+    --secondary-foreground: 220 43% 11%;
+    --muted: 216 20% 95%;
+    --muted-foreground: 221 13% 46%; /* #667085 */
+    --accent: 142 76% 94%;
+    --accent-foreground: 142 72% 24%;
+    --destructive: 0 72% 51%; /* #DC2626 */
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 50%; /* #F59E0B */
+    --warning-foreground: 24 64% 16%;
+    --border: 218 17% 91%; /* #E4E7EC */
+    --input: 218 17% 91%;
+    --ring: 142 76% 36%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    /* Leakify dark theme — deep midnight navy surfaces */
+    --background: 218 53% 9%; /* #0B1424 */
+    --foreground: 204 24% 96%; /* #F2F5F7 */
+    --card: 217 42% 14%; /* #141F31 */
+    --card-foreground: 204 24% 96%;
+    --popover: 217 42% 14%;
+    --popover-foreground: 204 24% 96%;
+    --primary: 142 71% 45%; /* #22C55E */
+    --primary-foreground: 150 60% 8%;
+    --secondary: 219 29% 18%; /* #20293A */
+    --secondary-foreground: 204 24% 96%;
+    --muted: 219 29% 18%;
+    --muted-foreground: 214 17% 66%; /* #9AA7B8 */
+    --accent: 216 41% 22%;
+    --accent-foreground: 204 24% 96%;
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 43 96% 56%; /* #FBBF24 */
+    --warning-foreground: 32 81% 12%;
+    --border: 216 29% 20%; /* #243042 */
+    --input: 216 29% 20%;
+    --ring: 142 71% 45%;
+  }
+}
