@@ -15,6 +15,12 @@ Every row was run locally before being marked done:
 | `npx expo export --platform web` | ✅ builds — 4 927 KB raw / 866 KB gzip single entry chunk |
 | `npm run check:env` | ✅ all `.env*` variants ignored, `.env.example` tracked |
 | `npm run scan:secrets` | ✅ clean (98 tracked files, 12 patterns); `--history` clean too |
+| GitHub Actions (this branch) | ✅ **all four jobs green** on the first push — run `38166274234`: typecheck/lint/250 tests ×3 timezones, Postgres 15 schema + RLS + payment RPC, web export, dependency & repository security checks |
+
+These are the CI commands run against a **lockfile-exact** `npm ci` install, which is how the one
+real gap was found: the optional `embedded-postgres` dynamic import in `scripts/db-tests.mjs` tripped
+`import/no-unresolved` in CI only, because a local tree with `--no-save` extras hides it. Lint is now
+verified that way.
 
 ---
 
@@ -34,7 +40,7 @@ Every row was run locally before being marked done:
 | **C-02** annual projection rounding (was "by design, undocumented") | The definition is now written down: `annual = monthlyEquivalent × 12` so headline figures reconcile, with the measured drift example (199 ¢/week → 10 344 ¢ vs 10 348 ¢ exact); UI label reads "≈ 12 × monthly" | `lib/billing.ts`, `app/subscription/[id]/index.tsx`, `lib/__tests__/billing.test.ts` (17, 3 new cases pin the drift) |
 | **C-03** date/TZ reasoning correct but unguarded | DST-boundary and fixed-clock regression cases; whole suite verified in three time zones | `lib/__tests__/dates.test.ts` (23) |
 | **U-04 / N-03** mode switch silently orphaned records | Explicit, non-destructive policy: the *other* store's contents are counted from the repositories and disclosed; copying on-device records into the account is opt-in, deduped by (name, amount, currency, interval, next date, status), leaves the local list untouched, and reports partial failure. No auto-upload, no deletion, ever | `features/subscriptions/mode-transition.ts` (17), `promoteLocalDataToCloud()` in `features/subscriptions/store.ts`, Settings → Storage & sync |
-| **Q-01 / S-09** no CI, no security automation | `.github/workflows/ci.yml`: typecheck, lint, tests ×3 timezones, web export, Postgres schema+RLS job, env hygiene, secret scan, bundle-size report; `.github/dependabot.yml`; `SECURITY.md` | CI file (never yet run — the repo has 0 workflow runs; the first push produces the first real signal) |
+| **Q-01 / S-09** no CI, no security automation | `.github/workflows/ci.yml`: typecheck, lint, tests ×3 timezones, web export, Postgres schema+RLS job, env hygiene, secret scan, bundle-size report; `.github/dependabot.yml`; `SECURITY.md` | First-ever run of this repo's CI is green (run `38166274234`) |
 | **S-08** `.env*` not fully ignored | `.gitignore` covers every variant; `scripts/check-env-hygiene.mjs` fails CI if a new pattern slips | `npm run check:env` |
 | **Q-03 / R-03** unpinned toolchain, untracked bundle size | `engines: node >=22 <23`, prettier config + `format`/`format:check`, `scripts/report-bundle-size.mjs` in CI (reporting only, no threshold yet) | `package.json`, CI |
 
