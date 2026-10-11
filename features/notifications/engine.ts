@@ -43,6 +43,16 @@ export const REMINDER_FIRE_HOUR = 9;
 
 export type ReminderType = 'renewal' | 'trial';
 
+/**
+ * How much a notification says out loud. `generic` never contains a service
+ * name, an amount, a payment-method label or a note — that is the whole point,
+ * and there is a test pinning it (OWASP MASWE-0037: sensitive notification
+ * content is readable on a locked device).
+ */
+export type NotificationPreviewMode = 'generic' | 'detailed';
+
+export const DEFAULT_PREVIEW_MODE: NotificationPreviewMode = 'generic';
+
 export interface ReminderPlan {
   /** `${subscriptionId}:${occurrenceDate}:${type}:${leadDays}` — stable dedup key. */
   key: string;
@@ -109,6 +119,14 @@ function triggerDateTime(occurrenceDate: string, leadDays: number): Date | null 
   return parsed;
 }
 
+/** When the reminder fires, phrased without revealing what is being billed. */
+function leadPhrase(occurrenceDate: string, leadDays: number, refISO: string): string {
+  const when = relativeDayLabel(occurrenceDate, refISO);
+  if (when === 'Tomorrow') return 'tomorrow';
+  if (leadDays === 0) return 'today';
+  return `in ${leadDays} day${leadDays === 1 ? '' : 's'}`;
+}
+
 export function renewalCopy(
   name: string,
   amountCents: number,
@@ -116,7 +134,14 @@ export function renewalCopy(
   occurrenceDate: string,
   leadDays: number,
   refISO: string,
+  previewMode: NotificationPreviewMode = DEFAULT_PREVIEW_MODE,
 ): { title: string; body: string } {
+  if (previewMode === 'generic') {
+    return {
+      title: `A subscription renewal is coming up ${leadPhrase(occurrenceDate, leadDays, refISO)}`,
+      body: 'Open Leakify to review the charge before it goes through.',
+    };
+  }
   const amount = formatMoney(amountCents, currency);
   if (leadDays === 0) {
     return {
@@ -131,12 +156,24 @@ export function renewalCopy(
   };
 }
 
+/**
+ * Trial reminders in `generic` mode say the deadline exists without naming the
+ * service, so a glance at a lock screen cannot out you to whoever is standing
+ * next to you.
+ */
 export function trialCopy(
   name: string,
   occurrenceDate: string,
   leadDays: number,
   refISO: string,
+  previewMode: NotificationPreviewMode = DEFAULT_PREVIEW_MODE,
 ): { title: string; body: string } {
+  if (previewMode === 'generic') {
+    return {
+      title: `A free trial ends ${leadPhrase(occurrenceDate, leadDays, refISO)}`,
+      body: 'Open Leakify to review it before you are charged.',
+    };
+  }
   if (leadDays === 0) {
     return {
       title: `Your ${name} free trial ends today`,
@@ -155,6 +192,8 @@ export interface EngineOptions {
   horizonDays?: number;
   /** Current local ISO datetime, injected for testability. */
   nowISO?: string;
+  /** Lock-screen privacy for the generated copy. Defaults to `generic`. */
+  previewMode?: NotificationPreviewMode;
 }
 
 /**
@@ -164,6 +203,7 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
   const now = options.nowISO ? new Date(options.nowISO) : new Date();
   const refISO = toISODate(now);
   const horizonDays = options.horizonDays ?? DEFAULT_HORIZON_DAYS;
+  const previewMode = options.previewMode ?? DEFAULT_PREVIEW_MODE;
   const plans: ReminderPlan[] = [];
 
   for (const sub of subs) {
@@ -176,7 +216,7 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
         for (const lead of prefs.renewalLeadDays) {
           const trigger = triggerDateTime(occurrenceDate, lead);
           if (!trigger || trigger.getTime() <= now.getTime()) continue;
-          const copy = renewalCopy(sub.name, sub.amountCents, sub.currency, occurrenceDate, lead, refISO);
+          const copy = renewalCopy(sub.name, sub.amountCents, sub.currency, occurrenceDate, lead, refISO, previewMode);
           plans.push({
             key: reminderKey(sub.id, occurrenceDate, 'renewal', lead),
             subscriptionId: sub.id,
@@ -196,7 +236,7 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
         for (const lead of prefs.trialLeadDays) {
           const trigger = triggerDateTime(sub.trialEndDate!, lead);
           if (!trigger || trigger.getTime() <= now.getTime()) continue;
-          const copy = trialCopy(sub.name, sub.trialEndDate!, lead, refISO);
+          const copy = trialCopy(sub.name, sub.trialEndDate!, lead, refISO, previewMode);
           plans.push({
             key: reminderKey(sub.id, sub.trialEndDate!, 'trial', lead),
             subscriptionId: sub.id,

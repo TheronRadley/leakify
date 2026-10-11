@@ -4,8 +4,10 @@ import {
   isValidISODate,
   nextOccurrenceOnOrAfter,
   nthOccurrence,
+  parseISODate,
   relativeDayLabel,
   subtractDaysISO,
+  toISODate,
   todayISO,
 } from '@/lib/dates';
 
@@ -118,5 +120,41 @@ describe('daysBetween / subtractDaysISO / validity', () => {
   });
   it('todayISO returns a yyyy-MM-dd string', () => {
     expect(todayISO(new Date(2026, 9, 10))).toBe('2026-10-10');
+  });
+});
+
+// A subscription that bills "the 9th of every month" does not care that one of
+// the days it steps over was 23 or 25 hours long. Any DST-elapsed-hours math
+// would shift billing dates for users in the affected zones depending on which
+// side of the transition the app was opened — so the date arithmetic must be
+// calendar-based, and these cases run under the CI timezone matrix (UTC,
+// America/Los_Angeles, Pacific/Auckland) to prove it.
+describe('daylight-saving transitions', () => {
+  it('steps one day across the US spring-forward (23-hour local day)', () => {
+    const springForward = parseISODate('2026-03-08')!; // America/Los_Angeles: 02:00 -> 03:00
+    expect(toISODate(addInterval(springForward, { every: 1, unit: 'day' }, 1))).toBe('2026-03-09');
+    const elapsedHours = (parseISODate('2026-03-09')!.getTime() - springForward.getTime()) / 3_600_000;
+    expect(elapsedHours).toBeGreaterThanOrEqual(23);
+    expect(elapsedHours).toBeLessThanOrEqual(24);
+  });
+
+  it('steps one day across the southern-hemisphere fall-back (25-hour local day)', () => {
+    const fallBack = parseISODate('2026-04-04')!; // Pacific/Auckland: DST ends 2026-04-05
+    expect(toISODate(addInterval(fallBack, { every: 1, unit: 'day' }, 1))).toBe('2026-04-05');
+    expect(toISODate(addInterval(fallBack, { every: 1, unit: 'week' }, 1))).toBe('2026-04-11');
+  });
+
+  it('counts calendar days, not elapsed hours, across the boundary', () => {
+    expect(daysBetween('2026-03-07', '2026-03-09')).toBe(2);
+    expect(daysBetween('2026-04-04', '2026-04-06')).toBe(2);
+    expect(daysBetween('2026-10-24', '2026-10-26')).toBe(2); // EU autumn change
+  });
+
+  it('keeps an anchored monthly schedule on the same day-of-month across transitions', () => {
+    const anchor = '2026-03-08';
+    expect(nthOccurrence(anchor, { every: 1, unit: 'month' }, 0)).toBe('2026-03-08');
+    expect(nthOccurrence(anchor, { every: 1, unit: 'month' }, 1)).toBe('2026-04-08');
+    expect(nthOccurrence(anchor, { every: 1, unit: 'month' }, 6)).toBe('2026-09-08');
+    expect(nthOccurrence(anchor, { every: 2, unit: 'year' }, 1)).toBe('2028-03-08');
   });
 });

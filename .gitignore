@@ -30,8 +30,12 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files — ignore every .env variant by default so a real
+# `.env.production` (or `.env.local`, `.env.staging`, …) can never be
+# committed by accident. Only the committed example is allowed back in.
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -39,6 +43,3 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-
-# env with possible public anon keys
-.env

@@ -27,14 +27,23 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { useAuth } from '@/features/auth/auth-context';
+import {
+  discardQuarantined,
+  getStorageIssues,
+  restoreQuarantined,
+} from '@/services/local-storage';
 import { getPermissionStatus, requestPermissions } from '@/features/notifications/service';
 import {
   deleteAllAccountData,
+  promoteLocalDataToCloud,
+  readModeCounts,
+  refreshSubscriptions,
   resetDemoData,
   updateNotificationSettings,
   updateProfile,
   useDataStore,
 } from '@/features/subscriptions/store';
+import { describeModeTransition, describePromotion } from '@/features/subscriptions/mode-transition';
 import { RENEWAL_LEAD_OPTIONS, SUPPORTED_CURRENCIES, TRIAL_LEAD_OPTIONS } from '@/lib/constants';
 import { useAppTheme, type ThemePreference } from '@/lib/theme';
 import { cn } from '@/lib/utils';
@@ -115,7 +124,47 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
 export default function SettingsScreen() {
   const router = useRouter();
   const auth = useAuth();
-  const { profile, subscriptions, notificationSettings, isDemo } = useDataStore();
+  const { profile, subscriptions, notificationSettings, isDemo, mode } = useDataStore();
+  const [modeCounts, setModeCounts] = React.useState<{
+    localOnlyCount: number;
+    cloudOnlyCount: number;
+    promotableCount: number;
+  } | null>(null);
+  const [promotionNote, setPromotionNote] = React.useState<string | null>(null);
+  const [isPromoting, setIsPromoting] = React.useState(false);
+
+  // What the *other* store holds, read from the repositories so the copy below can
+  // be trusted. Recomputed when the active list or the sign-in changes.
+  const signedInId = auth.user?.id ?? null;
+  React.useEffect(() => {
+    let cancelled = false;
+    void readModeCounts(signedInId).then((counts) => {
+      if (!cancelled) setModeCounts(counts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInId, mode, subscriptions.length]);
+
+  const modeNotice = modeCounts
+    ? describeModeTransition({
+        mode,
+        isSignedIn: Boolean(signedInId),
+        localOnlyCount: modeCounts.promotableCount,
+        cloudOnlyCount: modeCounts.cloudOnlyCount,
+      })
+    : null;
+
+  const handlePromote = async () => {
+    setIsPromoting(true);
+    setPromotionNote(null);
+    try {
+      setPromotionNote(describePromotion(await promoteLocalDataToCloud()));
+      setModeCounts(await readModeCounts(signedInId));
+    } finally {
+      setIsPromoting(false);
+    }
+  };
   const { preference, setPreference } = useAppTheme();
   const [permission, setPermission] = React.useState<'granted' | 'denied' | 'undetermined'>('undetermined');
   const [busy, setBusy] = React.useState(false);
@@ -151,11 +200,39 @@ export default function SettingsScreen() {
     }
   };
 
+  /**
+   * Account deletion, ordered so nothing is claimed before it happens:
+   *   1. cloud: the trusted function deletes the server rows *and* the auth
+   *      identity (it throws on a partial failure, which we surface instead of
+   *      continuing),
+   *   2. local: reminders are cancelled, then the device scope is wiped,
+   *   3. sign out.
+   * A failure at step 1 leaves the account intact and retryable — that is the
+   * whole point of reporting rather than swallowing it.
+   */
   const handleDeleteAccount = async () => {
     setBusy(true);
+    setFeedback(null);
     try {
-      await deleteAllAccountData();
-      await auth.signOut();
+      if (auth.user) {
+        try {
+          await auth.deleteCloudAccount();
+        } catch (err) {
+          setFeedback(
+            err instanceof Error
+              ? `${err.message} Nothing was deleted on this device either, so you can retry safely.`
+              : 'Cloud account deletion did not complete. Nothing was deleted on this device, so you can retry safely.',
+          );
+          return;
+        }
+      }
+
+      const result = await deleteAllAccountData();
+      if (!result.dataDeleted) {
+        setFeedback(`${result.error ?? 'Local deletion did not finish.'} Try again — your data is still here.`);
+        return;
+      }
+      setFeedback('Your account and data were deleted.');
       router.replace('/(auth)/sign-in');
     } finally {
       setBusy(false);
@@ -164,9 +241,18 @@ export default function SettingsScreen() {
 
   const handleResetDemo = async () => {
     setBusy(true);
+    setFeedback(null);
     try {
-      await resetDemoData();
-      setFeedback('Demo data was refreshed.');
+      const result = await resetDemoData();
+      if (!result.dataDeleted) {
+        setFeedback(result.error ?? 'Demo refresh failed. Please try again.');
+        return;
+      }
+      setFeedback(
+        result.notificationsFailed > 0
+          ? 'Demo data was refreshed. Some reminders had already fired and needed no cancellation.'
+          : 'Demo data was refreshed.',
+      );
     } finally {
       setBusy(false);
     }
@@ -321,6 +407,28 @@ export default function SettingsScreen() {
           </View>
         </View>
         <Separator />
+        <View className="gap-2 p-4">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-3">
+              <Text className="font-medium">Detailed notification previews</Text>
+              <Text variant="small" className="text-muted-foreground">
+                Off (recommended): reminders say only that a renewal or trial is coming up. On: the
+                service name and amount appear on your lock screen, visible to anyone nearby.
+              </Text>
+            </View>
+            <Switch
+              checked={notificationSettings.previewMode === 'detailed'}
+              onCheckedChange={(checked) =>
+                void updateNotificationSettings({ previewMode: checked ? 'detailed' : 'generic' })
+              }
+              accessibilityLabel="Show service names and amounts in notifications"
+            />
+          </View>
+          <Text variant="small" className="text-muted-foreground">
+            Changing this re-schedules your reminders so the preview text matches.
+          </Text>
+        </View>
+        <Separator />
         <View className="flex-row items-center justify-between p-4">
           <View className="flex-1 pr-3">
             <Text className="font-medium">Weekly digest</Text>
@@ -355,6 +463,33 @@ export default function SettingsScreen() {
         </Section>
       ) : null}
 
+      {/* Mode transition: never let the other store become a silent surprise. */}
+      {modeNotice ? (
+        <Section title="Storage & sync">
+          <View className="gap-3 p-4">
+            <Text className="font-medium">{modeNotice.title}</Text>
+            <Text variant="small" className="text-muted-foreground">
+              {modeNotice.body}
+            </Text>
+            {modeNotice.action === 'upload' ? (
+              <Button
+                variant="outline"
+                loading={isPromoting}
+                onPress={() => void handlePromote()}
+                accessibilityLabel="Copy the on-device subscriptions into my account"
+              >
+                <Text>Copy them into my account</Text>
+              </Button>
+            ) : null}
+            {promotionNote ? (
+              <Text variant="small" className="text-muted-foreground">
+                {promotionNote}
+              </Text>
+            ) : null}
+          </View>
+        </Section>
+      ) : null}
+
       {/* Data & privacy */}
       <Section title="Data & privacy">
         <Row
@@ -375,7 +510,11 @@ export default function SettingsScreen() {
           icon={HelpCircle}
           title="Help & feedback"
           description="Report a bug or request a feature."
-          onPress={() => void Linking.openURL('mailto:support@leakify.app?subject=Leakify%20feedback')}
+          onPress={() => {
+            void Linking.openURL('mailto:support@leakify.app?subject=Leakify%20feedback').catch(() => {
+              setFeedback('Could not open your email app. Write to support@leakify.app instead.');
+            });
+          }}
         />
       </Section>
 
@@ -410,9 +549,13 @@ export default function SettingsScreen() {
               <View className="flex-row items-center gap-3 p-4">
                 <Icon as={Trash2} size={20} className="text-destructive" />
                 <View className="flex-1">
-                  <Text className="font-medium text-destructive">Delete all my data</Text>
+                  <Text className="font-medium text-destructive">
+                    {auth.user ? 'Delete my account and all my data' : 'Delete all my data on this device'}
+                  </Text>
                   <Text variant="small" className="text-muted-foreground">
-                    Removes subscriptions, settings and profile{auth.user ? ' from this device and the server' : ' from this device'}.
+                    {auth.user
+                      ? 'Removes your Leakify sign-in, your server rows (subscriptions, billing history, preferences) and this device copy. Permanent.'
+                      : 'Removes subscriptions, billing history, settings and profile from this device only — there is no account or server copy. Permanent.'}
                   </Text>
                 </View>
               </View>
@@ -423,7 +566,9 @@ export default function SettingsScreen() {
               <AlertDialogTitle>Delete all data?</AlertDialogTitle>
               <AlertDialogDescription>
                 This permanently removes your subscriptions, billing history, preferences and
-                profile. Any scheduled reminders are cancelled. This cannot be undone.
+                profile{auth.user ? ', and deletes the Leakify account itself' : ' from this device'}.
+                Scheduled reminders are cancelled first. This cannot be undone — export a copy
+                first if you want one.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -438,6 +583,10 @@ export default function SettingsScreen() {
         </AlertDialog>
       </Section>
 
+      {/* Storage diagnostics: a corrupt or newer-versioned payload must be
+          visible, never presented as "you have nothing". */}
+      <StorageDiagnostics />
+
       {feedback ? (
         <Text variant="small" className="pt-3 text-center text-primary" accessibilityLiveRegion="polite">
           {feedback}
@@ -449,6 +598,72 @@ export default function SettingsScreen() {
       </Text>
       <View className="h-6" />
     </Screen>
+  );
+}
+
+/**
+ * Surfaces local-storage read failures and offers the two honest actions:
+ * retry the recovery copy, or throw it away. Never shows stored values.
+ */
+function StorageDiagnostics() {
+  // Read at render time: the registry is in-memory and this screen re-renders
+  // after every action, so no effect (and no state-sync dance) is needed.
+  const issues = getStorageIssues();
+  const [note, setNote] = React.useState<string | null>(null);
+
+  if (issues.length === 0) return null;
+
+  const act = async (key: string, action: 'restore' | 'discard') => {
+    if (action === 'discard') {
+      await discardQuarantined(key);
+      setNote('The unreadable copy was discarded.');
+      return;
+    }
+    const restored = await restoreQuarantined(key);
+    setNote(
+      restored
+        ? 'Recovered the saved copy and refreshed the list.'
+        : 'The saved copy is still not readable by this version of Leakify. Nothing was changed.',
+    );
+    if (restored) await refreshSubscriptions();
+  };
+
+  return (
+    <Section title="Storage health">
+      <View className="gap-3 p-4">
+        <Text variant="small" className="leading-4 text-destructive" accessibilityRole="alert">
+          {issues.length === 1
+            ? 'One saved record could not be read, so it is not shown in the app. Its contents were preserved for recovery.'
+            : `${issues.length} saved records could not be read, so they are not shown in the app. Their contents were preserved for recovery.`}
+        </Text>
+        {issues.map((issue) => (
+          <View key={issue.key} className="flex-row items-center justify-between gap-3">
+            <View className="flex-1">
+              <Text variant="small" className="font-medium">
+                {issue.kind}
+              </Text>
+              <Text variant="small" className="text-muted-foreground">
+                {issue.status === 'unsupported_version'
+                  ? 'saved by a newer version of Leakify'
+                  : 'unreadable or partially saved'}{' '}
+                · {issue.bytes} bytes · {issue.at.slice(0, 10)}
+              </Text>
+            </View>
+            <Button size="sm" variant="outline" onPress={() => void act(issue.key, 'restore')}>
+              <Text>Recover</Text>
+            </Button>
+            <Button size="sm" variant="ghost" onPress={() => void act(issue.key, 'discard')}>
+              <Text>Discard</Text>
+            </Button>
+          </View>
+        ))}
+        {note ? (
+          <Text variant="small" className="text-muted-foreground" accessibilityLiveRegion="polite">
+            {note}
+          </Text>
+        ) : null}
+      </View>
+    </Section>
   );
 }
 

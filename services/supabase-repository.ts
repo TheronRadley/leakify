@@ -5,7 +5,10 @@
  * and errors are converted to user-safe RepositoryErrors.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { addInterval, parseISODate, toISODate } from '@/lib/dates';
+import { createRequestId } from '@/lib/id';
 import {
+  assertSafeCancellationUrl,
   RepositoryError,
   type BillingEventRepository,
   type NotificationSettingsRepository,
@@ -84,8 +87,14 @@ function rowToSubscription(row: SubscriptionRow): Subscription {
   };
 }
 
+/**
+ * Write-time URL gate, mirroring the local repository. RLS proves *who* owns a
+ * row; this proves *what* may be stored in it, so a value that skipped the form
+ * cannot end up as something `Linking.openURL` receives.
+ */
 function subscriptionToRow(input: Partial<SubscriptionInput> & Partial<Subscription>) {
   const row: Record<string, unknown> = {};
+  if (input.cancellationUrl !== undefined) input = { ...input, cancellationUrl: assertSafeCancellationUrl(input.cancellationUrl) };
   if (input.name !== undefined) row.name = input.name;
   if (input.provider !== undefined) row.provider = input.provider;
   if (input.category !== undefined) row.category = input.category;
@@ -110,6 +119,34 @@ function subscriptionToRow(input: Partial<SubscriptionInput> & Partial<Subscript
   if (input.canceledAt !== undefined) row.canceled_at = input.canceledAt;
   if (input.priceHistory !== undefined) row.price_history = input.priceHistory;
   return row;
+}
+
+/**
+ * Payment-specific error mapping. `leakify:*` prefixes are the RPC's own
+ * signals; a missing function means the deployment is behind its migrations,
+ * which must be said out loud instead of falling back to a non-atomic write.
+ */
+function toPaymentError(err: { message?: string; code?: string } | null): RepositoryError {
+  const message = (err?.message ?? '').toLowerCase();
+  if (message.includes('leakify:not_found')) {
+    return new RepositoryError('not_found', 'Subscription not found.');
+  }
+  if (message.includes('leakify:no_next_billing_date')) {
+    return new RepositoryError('validation', 'Add a next billing date before recording a payment.');
+  }
+  if (message.includes('leakify:invalid_next_billing_date')) {
+    return new RepositoryError('validation', 'The next billing date could not be advanced. Refresh and try again.');
+  }
+  if (message.includes('leakify:invalid_amount')) {
+    return new RepositoryError('validation', 'Payment amount must be zero or more.');
+  }
+  if (message.includes('record_payment') || message.includes('does not exist') || err?.code === 'PGRST202') {
+    return new RepositoryError(
+      'unknown',
+      'Cloud payment recording is unavailable: the project is missing a database migration. No payment was recorded.',
+    );
+  }
+  return toRepoError(err);
 }
 
 function toRepoError(err: { message?: string; code?: string } | null): RepositoryError {
@@ -201,35 +238,35 @@ export class SupabaseSubscriptionRepository implements SubscriptionRepository {
     return this.update(id, { status });
   }
 
+  /**
+   * Record a charge and roll the schedule forward in ONE database transaction
+   * (`record_payment`, see supabase/migrations/0004_record_payment_atomic.sql),
+   * carrying a retry key so a timed-out request cannot double-book history.
+   *
+   * The recurrence step itself stays in TypeScript (`lib/dates`, anchor-based
+   * and unit tested) — the SQL only refuses a date that does not move forward.
+   * That split is deliberate: one source of truth for money/date math, one
+   * transaction for durability.
+   */
   async recordPayment(id: string, actualDateISO: string, actualAmountCents: number): Promise<Subscription> {
     const sub = await this.get(id);
     if (!sub) throw new RepositoryError('not_found', 'Subscription not found.');
     if (!sub.nextBillingDate) throw new RepositoryError('validation', 'No next billing date to roll forward.');
 
-    // Roll the billing date forward locally, then persist both records in a
-    // two-step write. The DB has no cross-table RPC here on purpose — keeping
-    // logic client-visible and auditable.
-    const { addInterval, parseISODate, toISODate } = await import('@/lib/dates');
     const anchor = parseISODate(sub.nextBillingDate);
     if (!anchor) throw new RepositoryError('validation', 'Saved billing date is invalid.');
     const next = toISODate(addInterval(anchor, sub.interval, 1));
 
-    const { error: eventError } = await this.db.from('billing_events').insert({
-      subscription_id: sub.id,
-      user_id: this.userId,
-      expected_date: sub.nextBillingDate,
-      amount_cents: sub.amountCents,
-      currency: sub.currency,
-      type: sub.status === 'trialing' ? 'trial_end' : 'renewal',
-      status: 'charged',
-      actual_date: actualDateISO,
-      actual_amount_cents: actualAmountCents,
+    const { data, error } = await this.db.rpc('record_payment', {
+      p_subscription_id: sub.id,
+      p_actual_date: actualDateISO,
+      p_actual_amount_cents: actualAmountCents,
+      p_next_billing_date: next,
+      p_client_request_id: createRequestId(),
     });
-    if (eventError) throw toRepoError(eventError);
-    return this.update(id, {
-      nextBillingDate: next,
-      ...(sub.status === 'trialing' ? { status: 'active' as const } : {}),
-    });
+    if (error) throw toPaymentError(error);
+    if (!data) throw new RepositoryError('not_found', 'Subscription not found.');
+    return rowToSubscription(data as SubscriptionRow);
   }
 }
 
@@ -352,12 +389,41 @@ export class SupabaseProfileRepository implements ProfileRepository {
     };
   }
 
-  /** Removes all user data, then lets the caller delete the auth user (needs a server-side function). */
+  /**
+   * Remove every row this user owns. Children are deleted before parents so a
+   * mid-way failure leaves a retryable (not orphaned) state, and each call's
+   * error is propagated — a swallowed delete used to be reported to the user as
+   * a successful account wipe. `notification_preferences` is included; it was
+   * the table the original version missed.
+   *
+   * Deleting the *auth identity* is not possible from a client (it needs the
+   * admin API) — see `services/cloud-account.ts` + the `delete-account` Edge
+   * Function. This method is the row-level half of a full deletion.
+   */
   async deleteAccountData(): Promise<void> {
-    await this.db.from('subscriptions').delete().eq('user_id', this.userId);
-    await this.db.from('billing_events').delete().eq('user_id', this.userId);
-    await this.db.from('notification_records').delete().eq('user_id', this.userId);
-    await this.db.from('profiles').delete().eq('id', this.userId);
+    // `user_id`-scoped tables first (children before parents), then `profiles`,
+    // which is keyed by the auth id instead.
+    const byUserId = ['notification_records', 'billing_events', 'notification_preferences', 'subscriptions'];
+    const failed: string[] = [];
+
+    for (const table of byUserId) {
+      try {
+        const { error } = await this.db.from(table).delete().eq('user_id', this.userId);
+        if (error) failed.push(table);
+      } catch {
+        failed.push(table);
+      }
+    }
+    try {
+      const { error } = await this.db.from('profiles').delete().eq('id', this.userId);
+      if (error) failed.push('profiles');
+    } catch {
+      failed.push('profiles');
+    }
+
+    if (failed.length > 0) {
+      throw new RepositoryError('unknown', 'Some of your cloud data could not be deleted. Please try again.');
+    }
   }
 }
 
@@ -368,13 +434,17 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
   ) {}
 
   async get(): Promise<NotificationSettings> {
-    const { data } = await this.db
+    const { data, error } = await this.db
       .from('notification_preferences')
       .select('*')
       .eq('user_id', this.userId)
       .maybeSingle();
+    // A read failure must not look like "you have no preferences": the store
+    // would then happily write back defaults over real settings.
+    if (error) throw toRepoError(error);
     if (!data) {
       return {
+        previewMode: 'generic',
         renewalLeadDays: [3, 1, 0],
         trialLeadDays: [1],
         weeklyDigestEnabled: false,
@@ -385,8 +455,10 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
       renewal_lead_days: number[];
       trial_lead_days: number[];
       weekly_digest_enabled: boolean;
+      preview_mode?: string | null;
     };
     return {
+      previewMode: row.preview_mode === 'detailed' ? 'detailed' : 'generic',
       renewalLeadDays: row.renewal_lead_days ?? [3, 1, 0],
       trialLeadDays: row.trial_lead_days ?? [1],
       weeklyDigestEnabled: row.weekly_digest_enabled ?? false,
@@ -396,6 +468,7 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
 
   async update(patch: Partial<NotificationSettings>): Promise<NotificationSettings> {
     const row: Record<string, unknown> = { user_id: this.userId, updated_at: new Date().toISOString() };
+    if (patch.previewMode !== undefined) row.preview_mode = patch.previewMode;
     if (patch.renewalLeadDays !== undefined) row.renewal_lead_days = patch.renewalLeadDays;
     if (patch.trialLeadDays !== undefined) row.trial_lead_days = patch.trialLeadDays;
     if (patch.weeklyDigestEnabled !== undefined) row.weekly_digest_enabled = patch.weeklyDigestEnabled;

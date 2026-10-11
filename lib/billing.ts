@@ -53,7 +53,21 @@ export function monthlyEquivalentCents(amountCents: number, interval: BillingInt
   return Math.round(amountCents * periodsPerMonth(interval));
 }
 
-/** Annual projection = twelve months of the current monthly equivalent. */
+/**
+ * Annual projection = twelve months of the *displayed* monthly equivalent.
+ *
+ * This is a product definition, not a rounding accident, and it is deliberate:
+ * the two headline numbers on a subscription must reconcile with each other
+ * (12 × what you see under "monthly"), even though it differs slightly from the
+ * exact sum of the year's charges. Example, 199¢/week:
+ *   monthly equivalent  = round(199 × 52 / 12) = 862¢  →  12 × 862 = 10344¢
+ *   exact annual charges  = round(199 × 52)            = 10348¢  (4¢ apart)
+ *
+ * If a screen ever needs "expected charges per year" instead, compute
+ * `round(amountCents * PERIODS_PER_YEAR[unit] / every)` and label it that way —
+ * never reuse this function under an "expected yearly spend" label. Totals are
+ * always per-currency; nothing here converts between currencies.
+ */
 export function annualEquivalentCents(amountCents: number, interval: BillingIntervalValue): number {
   return monthlyEquivalentCents(amountCents, interval) * 12;
 }

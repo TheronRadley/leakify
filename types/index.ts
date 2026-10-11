@@ -102,7 +102,17 @@ export interface BillingEvent {
   createdAt: string;
 }
 
+export type NotificationPreviewMode = 'generic' | 'detailed';
+
 export interface NotificationSettings {
+  /**
+   * Lock-screen privacy for reminder text.
+   * - `generic` (default): no service names, amounts or payment labels — the
+   *   reminder says only that a renewal/trial is coming up.
+   * - `detailed`: names the service and shows the amount, which is readable by
+   *   anyone holding the device.
+   */
+  previewMode: NotificationPreviewMode;
   /** Default renewal reminder leads for new subscriptions, e.g. [3, 1, 0]. */
   renewalLeadDays: number[];
   /** Default trial reminders, e.g. [1]. */

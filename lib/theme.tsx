@@ -3,10 +3,10 @@
  * user preference (system / light / dark) and exposes resolved scheme +
  * brand-semantic colors for places that need raw values (icons, tab bar).
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { useColorScheme as useNativeWindColorScheme } from 'nativewind';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { storageKeys } from '@/services/local-storage';
+import { readRaw, storageKeys, writeRaw } from '@/services/local-storage';
 import type { Profile } from '@/types';
 
 export type ThemePreference = Profile['themePreference'];
@@ -29,7 +29,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    AsyncStorage.getItem(storageKeys.theme).then((raw) => {
+    readRaw(storageKeys.theme).then((raw) => {
       if (mounted && (raw === 'light' || raw === 'dark' || raw === 'system')) {
         setPreferenceState(raw);
         setColorScheme(raw);
@@ -47,7 +47,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       setPreference: (pref) => {
         setPreferenceState(pref);
         setColorScheme(pref);
-        AsyncStorage.setItem(storageKeys.theme, pref).catch(() => undefined);
+        writeRaw(storageKeys.theme, pref);
       },
     }),
     [colorScheme, preference, setColorScheme],

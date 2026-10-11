@@ -1,0 +1,45 @@
+# Dependency update policy (see also SECURITY.md).
+#
+# - npm patches/minors and GitHub Actions arrive as reviewable PRs that must
+#   pass CI; majors are grouped so a human decides each one.
+# - Expo/React Native majors are deliberately left to `npx expo install --fix`
+#   after checking the SDK compatibility table — an unreviewed SDK bump can
+#   break the native build in ways npm cannot detect.
+# - The `npm ci` + typecheck + lint + jest + expo export jobs in
+#   .github/workflows/ci.yml are the gate for every update PR. Enable branch
+#   protection with those checks required before relying on this file.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: '05:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 8
+    versioning-strategy: increase
+    groups:
+      non-breaking-npm:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Expo SDK packages move together; bump them with `npx expo install --fix`.
+      - dependency-name: 'expo'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'expo-*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-native'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - '*'

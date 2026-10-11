@@ -1,0 +1,10 @@
+# generated / vendored
+node_modules/
+dist/
+web-build/
+.expo/
+package-lock.json
+android/
+ios/
+# checked-in reports are historical evidence; do not reflow them
+AUDIT-RESOLVED.md

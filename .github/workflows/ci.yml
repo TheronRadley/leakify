@@ -1,0 +1,143 @@
+name: CI
+
+# Every gate below is an existing project command; CI only makes them
+# un-skippable. Keep required-check names in sync with branch protection:
+#   quality / web-bundle / database / security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 is the current LTS and the version the lockfile was made with.
+          node-version: '22'
+          cache: npm
+
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (default timezone)
+        run: npx jest --ci
+
+      - name: Unit tests (TZ=UTC)
+        run: npm test -- --ci
+        env:
+          TZ: UTC
+
+      - name: Unit tests (TZ=America/Los_Angeles)
+        run: npm test -- --ci
+        env:
+          TZ: America/Los_Angeles
+
+      - name: Unit tests (TZ=Pacific/Auckland)
+        run: npm test -- --ci
+        env:
+          TZ: Pacific/Auckland
+
+  web-bundle:
+    name: Web bundle export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Expo web export
+        # Catches Metro/Babel/config breakage that typecheck cannot see.
+        run: npx expo export --platform web
+      - name: Bundle size baseline
+        # Reported, not gated: thresholds need a measured distribution first.
+        run: node scripts/report-bundle-size.mjs || true
+
+  database:
+    name: Schema & RLS tests (Postgres 15)
+    runs-on: ubuntu-latest
+    # The client and the migrations must land on the same major version the
+    # Supabase project runs on, so keep this aligned with the project's Postgres.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: leakify_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d leakify_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/leakify_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations + run SQL assertions (RLS, owner boundaries)
+        run: npm run test:db
+
+  security:
+    name: Dependency & repository security checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan can see anything ever committed.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Env-file hygiene (.env* ignored, .env.example tracked)
+        run: npm run check:env
+
+      - name: Secret scan (tracked files + history)
+        run: npm run scan:secrets -- --history
+
+      - name: npm audit (production dependencies)
+        # Visible but non-blocking while the existing advisory backlog is being
+        # triaged. Flip to `npm audit --omit=dev --audit-level=high` (no
+        # continue-on-error) once the backlog is at zero — do not suppress
+        # advisories permanently.
+        continue-on-error: true
+        run: |
+          npm audit --omit=dev --audit-level=high || true
+          npm audit --omit=dev --json > npm-audit-production.json
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-production
+          path: npm-audit-production.json
+          if-no-files-found: ignore

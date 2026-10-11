@@ -12,6 +12,11 @@ import {
   type DigestPlan,
   type ReminderPlan,
 } from '@/features/notifications/engine';
+import {
+  cancelScopeNotifications,
+  type CleanupOutcome,
+  type NotificationCanceller,
+} from '@/features/notifications/cleanup';
 import type { ScheduledNotificationRepository } from '@/services/repository';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
@@ -95,7 +100,9 @@ export async function syncNotificationSchedule(
   }
 
   try {
-    const plans: (ReminderPlan | DigestPlan)[] = computeReminderPlans(subscriptions);
+    // The user's privacy choice decides what a lock screen can read.
+    const engineOptions = { previewMode: settings.previewMode ?? 'generic' } as const;
+    const plans: (ReminderPlan | DigestPlan)[] = computeReminderPlans(subscriptions, engineOptions);
     if (settings.weeklyDigestEnabled) {
       const digest = computeDigestPlan(subscriptions);
       if (digest) plans.push(digest);
@@ -165,13 +172,37 @@ export async function syncNotificationSchedule(
   }
 }
 
-/** Cancel everything we have scheduled (used by account deletion / demo reset). */
-export async function cancelAllScheduled(repository: ScheduledNotificationRepository): Promise<void> {
-  if (Platform.OS === 'web') return;
-  try {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-  } catch {
-    // Best effort.
+/**
+ * Adapter that cancels single notifications through expo-notifications.
+ * Only per-id cancellation is used on purpose: `cancelAllScheduledNotificationsAsync()`
+ * would also clear notifications that belong to other Leakify profiles on the
+ * same device (or to unrelated app features), and it wipes nothing we can prove
+ * was ours.
+ */
+export const expoNotificationCanceller: NotificationCanceller = {
+  async cancel(osNotificationId: string) {
+    await Notifications.cancelScheduledNotificationAsync(osNotificationId);
+  },
+};
+
+/**
+ * Cancel every reminder recorded for one scope and clear that scope's
+ * bookkeeping — used by account deletion and demo reset.
+ *
+ * Order is the contract: cancellation first, storage second (see
+ * `cancelScopeNotifications`). On web there is no OS schedule, so only the
+ * bookkeeping is cleared.
+ */
+export async function cancelScheduledForScope(
+  repository: ScheduledNotificationRepository,
+  canceller: NotificationCanceller = expoNotificationCanceller,
+): Promise<CleanupOutcome> {
+  const records = await repository.list();
+  if (Platform.OS === 'web') {
+    await repository.saveAll([]);
+    return { attempted: 0, canceled: 0, failedOsIds: [], cleared: true, noop: records.length === 0 };
   }
-  await repository.saveAll([]);
+  return cancelScopeNotifications(records, canceller, {
+    clearBookkeeping: () => repository.saveAll([]),
+  });
 }

@@ -41,8 +41,9 @@ export default function RecoverScreen() {
       {sent ? (
         <View className="gap-4">
           <Text className="leading-6 text-muted-foreground">
-            Check your inbox — if an account exists for that address, a recovery link is on
-            its way. The link opens Leakify and lets you set a new password.
+            Check your inbox — if an account exists for that address, a recovery link is on its
+            way. Opening it puts you back in Leakify on this device, where you set a new password.
+            The link works once and expires after an hour, so use the device where you are signed in.
           </Text>
           <Button onPress={() => router.replace('/(auth)/sign-in')} accessibilityLabel="Back to sign in">
             <Text>Back to sign in</Text>

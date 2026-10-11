@@ -70,8 +70,12 @@ describe('computeReminderPlans', () => {
     expect(noonLeads).toEqual([1, 0]);
   });
 
-  it('uses the actual saved name, amount and currency in the copy', () => {
-    const plans = computeReminderPlans([sub({})], { nowISO: '2026-10-10T06:00:00', horizonDays: 10 });
+  it('uses the actual saved name, amount and currency in the copy (detailed mode)', () => {
+    const plans = computeReminderPlans([sub({})], {
+      nowISO: '2026-10-10T06:00:00',
+      horizonDays: 10,
+      previewMode: 'detailed',
+    });
     const threeDay = plans.find((p) => p.leadDays === 3 && p.occurrenceDate === '2026-10-13')!;
     expect(threeDay.title).toContain('Netflix');
     expect(threeDay.title).toContain('$15.49');
@@ -89,11 +93,55 @@ describe('computeReminderPlans', () => {
   it('schedules trial reminders with lead times', () => {
     const plans = computeReminderPlans(
       [sub({ status: 'trialing', trialEndDate: '2026-10-11', nextBillingDate: '2026-10-11' })],
-      { nowISO: '2026-10-10T06:00:00', horizonDays: 10 },
+      { nowISO: '2026-10-10T06:00:00', horizonDays: 10, previewMode: 'detailed' },
     );
     const trial = plans.find((p) => p.type === 'trial')!;
     expect(trial.title).toBe('Your Netflix free trial ends tomorrow');
     expect(trial.body).toContain('before you are charged');
+  });
+
+  // Lock-screen privacy (the default). A reminder must stay useful — the lead
+  // time survives — while never leaking what is being billed, for how much, or
+  // on which card.
+  it('defaults to generic copy that omits the service name and amount', () => {
+    const plans = computeReminderPlans([sub({})], { nowISO: '2026-10-10T06:00:00', horizonDays: 10 });
+    const threeDay = plans.find((p) => p.leadDays === 3)!;
+    expect(threeDay.title).toBe('A subscription renewal is coming up in 3 days');
+    expect(threeDay.body).toBe('Open Leakify to review the charge before it goes through.');
+    expect(threeDay.title).not.toMatch(/Netflix|15\.49|\$/);
+  });
+
+  it('keeps amounts, names and payment labels out of every generic plan', () => {
+    const leaky = sub({
+      name: 'Very Identifiable Streaming Co',
+      amountCents: 1549,
+      currency: 'USD',
+      paymentMethodLabel: 'Visa •••• 4242',
+      notes: 'shared password with roommates',
+      provider: 'Very Identifiable',
+    });
+    const plans = [
+      ...computeReminderPlans([leaky], { nowISO: '2026-10-10T06:00:00', horizonDays: 40 }),
+      ...computeReminderPlans(
+        [{ ...leaky, status: 'trialing' as const, trialEndDate: '2026-10-12' }],
+        { nowISO: '2026-10-10T06:00:00', horizonDays: 40 },
+      ),
+    ];
+    expect(plans.length).toBeGreaterThan(0);
+    for (const plan of plans) {
+      const text = `${plan.title} ${plan.body}`;
+      expect(text).not.toMatch(/Very Identifiable|Streaming|Visa|4242|roommates|15\.49|\d+\.\d{2}/);
+    }
+  });
+
+  it('generic trial copy names the deadline but not the service', () => {
+    const plans = computeReminderPlans(
+      [sub({ status: 'trialing', trialEndDate: '2026-10-11', nextBillingDate: '2026-10-11' })],
+      { nowISO: '2026-10-10T06:00:00', horizonDays: 10 },
+    );
+    const trial = plans.find((p) => p.type === 'trial')!;
+    expect(trial.title).toBe('A free trial ends tomorrow');
+    expect(trial.title).not.toContain('Netflix');
   });
 
   it('drops past-dated trials and billing dates gracefully', () => {

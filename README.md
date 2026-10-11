@@ -60,10 +60,16 @@ mode) or *Explore the demo* in onboarding.
 Cloud mode is **opt-in** and fully disabled until configured.
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Run the schema: paste `supabase/migrations/0001_initial_schema.sql` into the SQL editor
-   (or `supabase db push` with the CLI).
+2. Apply the schema **in order** — `supabase/migrations/0001…0004` (paste into the SQL editor or
+   `supabase db push`). `0002` adds the composite foreign keys that keep child rows inside one
+   owner, `0003` adds the notification preview mode, and `0004` adds the atomic
+   `record_payment()` RPC the app calls; signing in works without them, recording a payment does not.
 3. Enable Email auth in *Authentication → Providers*.
-4. Configure the app with **public** env vars (anon key only — service keys must never ship):
+4. In *Authentication → URL Configurations*, add both callback targets to **Redirect URLs** —
+   `leakify://auth/callback` and your deployed web origin `https://<host>/auth/callback` — and set
+   **Site URL** to the same web origin. Password-recovery links are issued as PKCE code links that
+   land on `/auth/callback`, inside the app.
+5. Configure the app with **public** env vars (anon key only — service keys must never ship):
 
 ```bash
 # .env (gitignored)
@@ -71,7 +77,18 @@ EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
 ```
 
-5. Restart the dev server. "Sign in & sync" appears on onboarding / sign-in screens.
+6. Restart the dev server. "Sign in & sync" appears on onboarding / sign-in screens.
+
+**Account deletion** (the "delete everything" action) calls the `delete-account` Edge Function,
+which removes the account *and* its rows; deploy it and store the secret it needs:
+
+```bash
+supabase functions deploy delete-account
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=...   # server-side only, never in the app bundle
+```
+
+Without the function the app still wipes local data and the rows your role can reach, and says so
+rather than claiming it deleted the account.
 
 Authorization is enforced by **Row Level Security policies** in the migration — every table
 (`profiles`, `subscriptions`, `billing_events`, `notification_preferences`,
@@ -135,10 +152,21 @@ are dropped, and the schedule is capped under the iOS 64-notification limit.
 ## ✅ Quality gates
 
 ```bash
-npm run typecheck   # tsc --noEmit (strict)
-npm run lint        # eslint (expo flat config)
-npm test            # 109 unit/integration tests
+npm run typecheck     # tsc --noEmit (strict)
+npm run lint          # eslint (expo flat config), zero warnings allowed
+npm test              # 250 unit/integration tests
+npm run test:db       # migrations + RLS/ownership/RPC assertions against real Postgres
+npm run check:env     # .gitignore coverage for every .env* variant
+npm run scan:secrets  # tracked-file secret scan (add --history to scan commits)
+npm run format:check  # prettier (npm run format to apply)
 ```
+
+`npm run test:db -- --embedded` boots a throwaway Postgres under `tmpdir()`, applies every migration
+and runs `supabase/tests/*.sql`: cross-user isolation, the owner boundary on child rows, and the
+payment RPC (idempotent replay, wrong-date rejection, trial→active). It needs
+`npm i -D --no-save embedded-postgres` first — deliberately not a dependency, so no
+platform-specific server binaries end up in the lockfile. CI runs the same suite against a
+Postgres 15 service container via `DATABASE_URL`.
 
 Test coverage includes: recurrence & leap-year math, every billing interval, currency
 separation/formatting/rounding, reminder scheduling, dedup & cancellation of reminders,
@@ -160,6 +188,9 @@ lucide-react-native · jest-expo.
 - **Web**: no native local notifications (in-app reminders inbox still works).
 - **Expo Go (Android)**: remote push tokens are unavailable since SDK 53; local scheduling
   works, but a dev build is the tested target for reminders.
-- **Auth on web**: Supabase email links need your deployed URL in Supabase redirect allow-list.
+- **Auth on web**: recovery links need your deployed origin in the Supabase redirect allow-list,
+  and the host must serve `index.html` for `/auth/callback` (the static export is a single-page
+  app, so a path-based 404 would swallow the link). Alternatively sign in with the link on the
+  platform it was opened on and let the session sync.
 - iOS builds require macOS/Xcode or EAS — not verifiable in CI sandbox; the JS bundle is
   verified via `expo export`.

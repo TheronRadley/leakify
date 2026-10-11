@@ -40,6 +40,7 @@ import {
 import { categoryLabel } from '@/lib/constants';
 import { formatMoney } from '@/lib/currency';
 import { formatDisplayDate, isValidISODate, relativeDayLabel, todayISO } from '@/lib/dates';
+import { validateCancellationUrl } from '@/lib/url';
 import type { BillingEvent } from '@/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -97,6 +98,27 @@ export default function SubscriptionDetailScreen() {
     }
   }, []);
 
+  /**
+   * Open the stored cancellation link — but only after re-validating it here.
+   * What is in storage may predate the URL policy (older build, future import),
+   * and an unvalidated string must never reach the platform opener. Failures are
+   * reported without echoing the link back.
+   */
+  const openCancellationLink = () => {
+    const result = validateCancellationUrl(sub?.cancellationUrl);
+    if (!result.ok) {
+      setActionError(
+        'This cancellation link is not a secure https:// address, so Leakify will not open it. ' +
+          'Edit the subscription to update the link.',
+      );
+      return;
+    }
+    setActionError(null);
+    void Linking.openURL(result.href).catch(() => {
+      setActionError('Leakify could not open that link on this device.');
+    });
+  };
+
   if (!sub) {
     return (
       <ErrorState
@@ -150,7 +172,7 @@ export default function SubscriptionDetailScreen() {
           </View>
           <View className="items-end">
             <Text variant="small" className="text-muted-foreground">
-              ≈ annual equivalent
+              ≈ 12 × monthly
             </Text>
             <MoneyText amountCents={annual} currency={sub.currency} variant="large" className="text-lg" />
           </View>
@@ -296,7 +318,7 @@ export default function SubscriptionDetailScreen() {
           <Button
             variant="outline"
             disabled={busy}
-            onPress={() => void Linking.openURL(sub.cancellationUrl!)}
+            onPress={openCancellationLink}
             accessibilityLabel={`Open cancellation page for ${sub.name}`}
           >
             <Icon as={ExternalLink} size={16} className="text-foreground" />

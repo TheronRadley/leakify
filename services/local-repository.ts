@@ -4,9 +4,11 @@
  * authorization shape Supabase RLS enforces in cloud mode.
  */
 import { todayISO, toISODate, addInterval, parseISODate } from '@/lib/dates';
+import { uuidV4 as generateId } from '@/lib/id'; // UUID-shaped ids, shared with the Supabase repository
 import { DEFAULT_CURRENCY } from '@/lib/constants';
 import { readJSON, removeKey, storageKeys, writeJSON } from '@/services/local-storage';
 import {
+  assertSafeCancellationUrl,
   RepositoryError,
   type BillingEventRepository,
   type NotificationSettingsRepository,
@@ -25,15 +27,14 @@ import type {
   SubscriptionStatus,
 } from '@/types';
 
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.floor(Math.random() * 16);
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
 
+/**
+ * Independent write-time validation. This does not trust the form: a stored
+ * cancellation link must satisfy the same HTTPS policy the UI enforces, because
+ * `Linking.openURL` is handed exactly this value later.
+ */
 function assertValidInput(input: Partial<SubscriptionInput>): void {
+  if (input.cancellationUrl !== undefined) assertSafeCancellationUrl(input.cancellationUrl);
   if (input.name !== undefined && input.name.trim().length === 0) {
     throw new RepositoryError('validation', 'Subscription name is required.');
   }
@@ -53,7 +54,10 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
   }
 
   protected async readAll(): Promise<Subscription[]> {
-    return readJSON<Subscription[]>(this.key, []);
+    // `subscriptions` is validated against the domain shape on read: a corrupt
+    // or future-versioned payload is quarantined and reported, never returned as
+    // an empty list that the UI would then present as "no subscriptions".
+    return readJSON<Subscription[]>(this.key, [], 'subscriptions');
   }
 
   protected async writeAll(subs: Subscription[]): Promise<void> {
@@ -75,6 +79,7 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
     const now = new Date().toISOString();
     const subscription: Subscription = {
       ...input,
+      cancellationUrl: assertSafeCancellationUrl(input.cancellationUrl),
       id: generateId(),
       userId: this.scope,
       createdAt: now,
@@ -115,6 +120,9 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
     const updated: Subscription = {
       ...current,
       ...patch,
+      ...(patch.cancellationUrl !== undefined
+        ? { cancellationUrl: assertSafeCancellationUrl(patch.cancellationUrl) }
+        : {}),
       priceHistory,
       canceledAt: statusChanged
         ? patch.status === 'canceled'
@@ -148,10 +156,17 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
     const next = toISODate(addInterval(anchor, sub.interval, 1));
 
     // Persist the billing event as history (never fabricate past records).
+    // Replay-safe: an event for this subscription's current expected date is only
+    // written once, so an interruption between the two writes below cannot
+    // duplicate charge history when the user retries. (The Supabase path gets the
+    // same guarantee from the `record_payment` RPC + unique client_request_id.)
     const eventsKey = storageKeys.billingEvents(this.scope);
-    const events = await readJSON<BillingEvent[]>(eventsKey, []);
+    const events = await readJSON<BillingEvent[]>(eventsKey, [], 'billingEvents');
     const now = new Date().toISOString();
-    events.push({
+    const alreadyRecorded = events.some(
+      (e) => e.subscriptionId === sub.id && e.expectedDate === sub.nextBillingDate && e.status === 'charged',
+    );
+    if (!alreadyRecorded) events.push({
       id: generateId(),
       subscriptionId: sub.id,
       userId: sub.userId,
@@ -175,19 +190,21 @@ export class LocalBillingEventRepository implements BillingEventRepository {
   constructor(private readonly scope: string) {}
 
   async listForSubscription(subscriptionId: string): Promise<BillingEvent[]> {
-    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), []);
+    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), [], 'billingEvents');
     return events
       .filter((e) => e.subscriptionId === subscriptionId)
       .sort((a, b) => b.expectedDate.localeCompare(a.expectedDate));
   }
 
   async listAll(): Promise<BillingEvent[]> {
-    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), []);
+    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), [], 'billingEvents');
     return events.sort((a, b) => b.expectedDate.localeCompare(a.expectedDate));
   }
 }
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  // Privacy-first default: reminder text never names a service or an amount.
+  previewMode: 'generic',
   renewalLeadDays: [3, 1, 0],
   trialLeadDays: [1],
   weeklyDigestEnabled: false,
@@ -198,7 +215,11 @@ export class LocalNotificationSettingsRepository implements NotificationSettings
   constructor(private readonly scope: string) {}
 
   async get(): Promise<NotificationSettings> {
-    const stored = await readJSON<NotificationSettings | null>(storageKeys.notificationSettings(this.scope), null);
+    const stored = await readJSON<NotificationSettings | null>(
+      storageKeys.notificationSettings(this.scope),
+      null,
+      'notificationSettings',
+    );
     return stored ?? DEFAULT_NOTIFICATION_SETTINGS;
   }
 
@@ -213,7 +234,7 @@ export class LocalScheduledNotificationRepository implements ScheduledNotificati
   constructor(private readonly scope: string) {}
 
   async list(): Promise<ScheduledNotification[]> {
-    return readJSON<ScheduledNotification[]>(storageKeys.scheduledNotifications(this.scope), []);
+    return readJSON<ScheduledNotification[]>(storageKeys.scheduledNotifications(this.scope), [], 'scheduledNotifications');
   }
 
   async saveAll(records: ScheduledNotification[]): Promise<void> {
@@ -234,7 +255,7 @@ export class LocalProfileRepository implements ProfileRepository {
   constructor(private readonly scope: string) {}
 
   async get(): Promise<Profile | null> {
-    const stored = await readJSON<Profile | null>(storageKeys.profile(this.scope), null);
+    const stored = await readJSON<Profile | null>(storageKeys.profile(this.scope), null, 'profile');
     if (stored) return stored;
     if (this.scope === 'demo') {
       const now = new Date().toISOString();

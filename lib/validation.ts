@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SUPPORTED_CURRENCY_CODES } from '@/lib/constants';
 import { isValidISODate } from '@/lib/dates';
+import { validateCancellationUrl } from '@/lib/url';
 
 export const CATEGORY_KEYS = [
   'streaming',
@@ -49,13 +50,13 @@ export const subscriptionFormSchema = z
     category: z.enum(CATEGORY_KEYS),
     status: z.enum(['active', 'trialing', 'paused', 'canceled']),
     paymentMethodLabel: z.string().trim().max(40, 'Payment method label is too long'),
+    // HTTPS-only, parser-based (see lib/url.ts). The repository validates again
+    // on write and the detail screen validates again before opening, so a value
+    // that arrives from an import or an older build cannot bypass the policy.
     cancellationUrl: z
       .string()
       .trim()
-      .refine(
-        (v) => v === '' || /^https?:\/\/.+\..+/.test(v),
-        'Enter a valid URL starting with http(s)://',
-      ),
+      .refine((v) => v === '' || validateCancellationUrl(v).ok, 'Enter a valid https:// link'),
     notes: z.string().trim().max(500, 'Notes are too long'),
   })
   .refine(

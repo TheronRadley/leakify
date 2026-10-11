@@ -6,9 +6,7 @@ import {
   getPermissionStatus,
   syncNotificationSchedule,
 } from '@/features/notifications/service';
-import { getDataState, useDataStore, useRepository } from '@/features/subscriptions/store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { storageKeys } from '@/services/local-storage';
+import { getDataState, observePermissionStatus, useDataStore, useRepository } from '@/features/subscriptions/store';
 import * as React from 'react';
 import { AppState, Platform } from 'react-native';
 
@@ -48,17 +46,16 @@ export function useNotificationSync() {
     return () => sub.remove();
   }, [status, runSync]);
 
-  // Re-check permission once per app session and persist the observation.
+  // Re-check permission once per app session and persist the observation through
+  // the settings repository. (It used to call AsyncStorage.mergeItem directly,
+  // which would have written a stray field next to the versioned envelope.)
   React.useEffect(() => {
     if (Platform.OS === 'web') return;
     void getPermissionStatus().then((perm) => {
       const mapped = perm === 'granted' ? 'granted' : perm === 'denied' ? 'denied' : 'unknown';
       const state = getDataState();
       if (state.notificationSettings.permissionStatus !== mapped && state.status === 'ready') {
-        void AsyncStorage.mergeItem(
-          storageKeys.notificationSettings(state.scope ?? 'local-user'),
-          JSON.stringify({ permissionStatus: mapped }),
-        );
+        void observePermissionStatus(mapped);
       }
     });
   }, []);

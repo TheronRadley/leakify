@@ -4,6 +4,7 @@
  * `SupabaseSubscriptionRepository` backs authenticated cloud mode. Both honor
  * the same data contract, so screens never branch on backend.
  */
+import { normalizeCancellationUrl } from '@/lib/url';
 import type {
   BillingEvent,
   NotificationSettings,
@@ -54,6 +55,22 @@ export interface NotificationSettingsRepository {
 export interface ScheduledNotificationRepository {
   list(): Promise<ScheduledNotification[]>;
   saveAll(records: ScheduledNotification[]): Promise<void>;
+}
+
+/**
+ * Storage-time URL gate, shared by the local and Supabase repositories.
+ *
+ * Form validation is a UX concern; this is the invariant. Anything that writes
+ * a `cancellationUrl` — form, import, migration, a future API client — passes
+ * through here, so the policy in `lib/url.ts` cannot be bypassed by skipping the
+ * form. Returns the normalized href (what gets stored) or throws a validation
+ * error whose message is safe to show and never echoes the value.
+ */
+export function assertSafeCancellationUrl(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const result = normalizeCancellationUrl(raw);
+  if ('value' in result) return result.value;
+  throw new RepositoryError('validation', `Cancellation link: ${result.message}`);
 }
 
 /** Data-layer error with a user-safe message. Never leaks secrets or PII. */

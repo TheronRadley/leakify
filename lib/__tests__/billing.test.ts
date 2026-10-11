@@ -71,6 +71,34 @@ describe('annualEquivalentCents', () => {
     const monthly = monthlyEquivalentCents(1000, { every: 1, unit: 'week' });
     expect(annualEquivalentCents(1000, { every: 1, unit: 'week' })).toBe(monthly * 12);
   });
+
+  // Regression guard for the documented rounding decision: 12 × the displayed
+  // monthly figure differs from the exact annual charge total by 4¢ at
+  // 199¢/week. Pinning the number here means changing the definition later is a
+  // deliberate, visible act rather than a silent drift.
+  it('pins the 199-per-week rounding difference from exact annualization', () => {
+    const weekly = { every: 1, unit: 'week' } as const;
+    expect(monthlyEquivalentCents(199, weekly)).toBe(862);
+    expect(annualEquivalentCents(199, weekly)).toBe(10344);
+    const exactAnnualCharges = Math.round(199 * 52);
+    expect(exactAnnualCharges).toBe(10348);
+    expect(exactAnnualCharges - annualEquivalentCents(199, weekly)).toBe(4);
+  });
+
+  it('stays internally consistent for unusual custom intervals', () => {
+    for (const interval of [
+      { every: 7, unit: 'day' },
+      { every: 5, unit: 'week' },
+      { every: 365, unit: 'day' },
+      { every: 2, unit: 'year' },
+    ] as const) {
+      const monthly = monthlyEquivalentCents(1234, interval);
+      expect(annualEquivalentCents(1234, interval)).toBe(monthly * 12);
+      // Never negative, never fractional minor units.
+      expect(Number.isInteger(monthly)).toBe(true);
+      expect(monthly).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe('currency separation', () => {
