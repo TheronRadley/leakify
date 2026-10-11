@@ -139,6 +139,9 @@ async function main() {
 async function withEmbeddedCluster() {
   let EmbeddedPostgres;
   try {
+    // Deliberately an optional install (see the header: no platform binaries in the
+    // lockfile), so an unresolved specifier here is expected, not a defect.
+    // eslint-disable-next-line import/no-unresolved
     ({ default: EmbeddedPostgres } = await import('embedded-postgres'));
   } catch {
     console.error('✖ `embedded-postgres` is not installed.\n   npm i -D --no-save embedded-postgres');
