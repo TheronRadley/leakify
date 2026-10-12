@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Text } from '@/components/ui/text';
 import { useAuth } from '@/features/auth/auth-context';
+import { RECOVERY_SENT_COPY } from '@/lib/auth-links';
 import { recoverySchema, type RecoveryValues } from '@/lib/validation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'expo-router';
@@ -41,8 +42,11 @@ export default function RecoverScreen() {
       {sent ? (
         <View className="gap-4">
           <Text className="leading-6 text-muted-foreground">
-            Check your inbox — if an account exists for that address, a recovery link is on
-            its way. The link opens Leakify and lets you set a new password.
+            {/* Derived from the flow we actually implement (lib/auth-links.ts):
+                the link must be opened on this device, where the PKCE code
+                verifier lives. The old copy promised a deep link nothing
+                handled (audit S-03). */}
+            {RECOVERY_SENT_COPY}
           </Text>
           <Button onPress={() => router.replace('/(auth)/sign-in')} accessibilityLabel="Back to sign in">
             <Text>Back to sign in</Text>

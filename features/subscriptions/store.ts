@@ -5,11 +5,22 @@
  * rollback machinery is needed.
  */
 import { useSyncExternalStore } from 'react';
+import { cancelAllScheduled } from '@/features/notifications/service';
 import { buildDemoSubscriptions, DEMO_PRICE_HISTORY } from '@/features/subscriptions/demo';
 import { createRepositories, type RepositoryBundle } from '@/services';
-import { toUserMessage } from '@/services/repository';
+import {
+  toSubscriptionInput,
+  type ImportAnalysis,
+  type ImportDuplicateStrategy,
+} from '@/features/subscriptions/import-export';
+import { migrateLocalStorage } from '@/services/local-storage';
+import {
+  toUserMessage,
+  type AccountDeletionResult,
+  type SubscriptionInput,
+  type SubscriptionPatch,
+} from '@/services/repository';
 import type { DataMode, NotificationSettings, Profile, Subscription, SubscriptionStatus } from '@/types';
-import type { SubscriptionInput, SubscriptionPatch } from '@/services/repository';
 
 export type StoreStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -29,6 +40,7 @@ const DEFAULT_SETTINGS: NotificationSettings = {
   renewalLeadDays: [3, 1, 0],
   trialLeadDays: [1],
   weeklyDigestEnabled: false,
+  genericLockScreenText: false,
   permissionStatus: 'unknown',
 };
 
@@ -74,6 +86,9 @@ export async function initializeStore(mode: DataMode, scope: string, opts?: { se
   setState({ status: 'loading', mode, scope, error: null, isDemo: opts?.seedDemo === true });
 
   try {
+    // Refuse to read data this build does not understand (and migrate what it
+    // does). Failures land in the error state below, where the user sees them.
+    await migrateLocalStorage();
     if (opts?.seedDemo) {
       const existing = await repos.subscriptions.list();
       if (existing.length === 0) {
@@ -173,18 +188,113 @@ export async function updateNotificationSettings(
   return settings;
 }
 
-/** Clear all demo data and return the demo scope to a pristine state. */
+/**
+ * Clear all demo data and return the demo scope to a pristine state.
+ *
+ * OS notifications are cancelled FIRST. The bookkeeping that maps our dedup
+ * keys to OS notification ids is deleted along with the rest of the scope, and
+ * once it is gone the next sync sees `existing = []` and can no longer cancel
+ * anything — so re-seeding would schedule a second copy of every reminder
+ * while the originals are still queued in the OS (audit N-01).
+ */
 export async function resetDemoData(): Promise<void> {
   const scope = state.scope;
   if (!scope || state.mode !== 'demo') return;
+  const repos = requireRepositories();
+  await cancelAllScheduled(repos.scheduledNotifications);
   await mutate((r) => r.profile.deleteAccountData());
   await initializeStore('demo', scope, { seedDemo: true });
 }
 
-/** Wipe every piece of data held under the current scope (account deletion). */
-export async function deleteAllAccountData(): Promise<void> {
-  await mutate((r) => r.profile.deleteAccountData());
-  setState({ subscriptions: [], profile: null });
+/**
+ * Wipe every piece of data held under the current scope (account deletion).
+ *
+ * Same ordering rule as the demo reset: cancel what the OS still holds before
+ * removing the records that identify it — otherwise reminders for deleted
+ * subscriptions keep firing, complete with their names and amounts.
+ *
+ * Returns the repository's deletion result so the UI can report honestly
+ * whether the cloud account itself was destroyed or only the data.
+ */
+export async function deleteAllAccountData(): Promise<AccountDeletionResult> {
+  const repos = requireRepositories();
+  await cancelAllScheduled(repos.scheduledNotifications);
+  const result = await mutate((r) => r.profile.deleteAccountData());
+  setState({ subscriptions: [], profile: null, notificationSettings: DEFAULT_SETTINGS });
+  return result;
+}
+
+function requireRepositories(): RepositoryBundle {
+  if (!repos) throw new Error('Store is not initialized');
+  return repos;
+}
+
+/**
+ * How many subscriptions exist in the on-device (`local-user`) scope, no matter
+ * which mode is active. Used to warn before a mode switch that would hide them
+ * (features/subscriptions/mode-transition.ts).
+ */
+export async function countLocalSubscriptions(): Promise<number> {
+  const repos = createRepositories('local', 'local-user');
+  const subscriptions = await repos.subscriptions.list();
+  return subscriptions.length;
+}
+
+export interface ImportResult {
+  created: number;
+  replaced: number;
+  skipped: number;
+  failed: number;
+}
+
+/**
+ * Apply a PREVIEWED import (see analyzeImport). Writes go through the active
+ * repository, so demo/local/cloud all behave the same and RLS still applies.
+ * Per-row failures are counted rather than thrown: a half-restored list the
+ * user can see beats an opaque error with no idea what landed.
+ */
+export async function importSubscriptions(
+  analysis: Extract<ImportAnalysis, { ok: true }>,
+  strategy: ImportDuplicateStrategy,
+): Promise<ImportResult> {
+  const repos = requireRepositories();
+  const result: ImportResult = { created: 0, replaced: 0, skipped: 0, failed: 0 };
+
+  for (const subscription of analysis.toCreate) {
+    try {
+      await repos.subscriptions.create(toSubscriptionInput(subscription));
+      result.created += 1;
+    } catch {
+      result.failed += 1;
+    }
+  }
+
+  for (const duplicate of analysis.duplicates) {
+    if (strategy === 'skip') {
+      result.skipped += 1;
+      continue;
+    }
+    try {
+      await repos.subscriptions.update(duplicate.existingId, toSubscriptionInput(duplicate.subscription));
+      result.replaced += 1;
+    } catch {
+      result.failed += 1;
+    }
+  }
+
+  if (analysis.profile) {
+    const { id: _id, createdAt: _c, updatedAt: _u, ...profilePatch } = analysis.profile;
+    try {
+      await repos.profile.upsert(profilePatch);
+    } catch {
+      result.failed += 1;
+    }
+  }
+
+  const subscriptions = await repos.subscriptions.list();
+  const profile = await repos.profile.get();
+  setState({ subscriptions, profile, error: null });
+  return result;
 }
 
 export function useSubscriptionById(id: string): Subscription | undefined {

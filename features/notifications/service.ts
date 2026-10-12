@@ -95,7 +95,9 @@ export async function syncNotificationSchedule(
   }
 
   try {
-    const plans: (ReminderPlan | DigestPlan)[] = computeReminderPlans(subscriptions);
+    const plans: (ReminderPlan | DigestPlan)[] = computeReminderPlans(subscriptions, {
+      genericText: settings.genericLockScreenText,
+    });
     if (settings.weeklyDigestEnabled) {
       const digest = computeDigestPlan(subscriptions);
       if (digest) plans.push(digest);

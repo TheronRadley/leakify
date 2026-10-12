@@ -49,6 +49,12 @@ export function getSupabase(): SupabaseClient {
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: Platform.OS === 'web',
+        // PKCE, explicitly. supabase-js defaults to the implicit flow, which
+        // puts access tokens in the redirect URL (browser history, logs,
+        // referrers). With PKCE the email link carries a one-time code that
+        // app/(auth)/auth-callback.tsx exchanges for a session, and the code
+        // verifier stays in the secure storage above (audit S-03).
+        flowType: 'pkce',
       },
     });
   }

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "strict": true,
     "types": [
-      "jest"
+      "jest",
+      "node"
     ],
     "paths": {
       "@/*": [
@@ -15,5 +16,11 @@
     "**/*.ts",
     "**/*.tsx",
     "nativewind-env.d.ts"
+  ],
+  // supabase/functions/* are Deno Edge Functions (Deno globals, https://
+  // imports) — not part of the app's TS program.
+  "exclude": [
+    "node_modules",
+    "supabase/functions"
   ]
 }

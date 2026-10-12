@@ -30,8 +30,11 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files — ignore every .env variant by default and allow-list the
+# documented template only. (`.env` alone or `.env*.local` alone leaves holes:
+# `.env.production`, `.env.staging`, `.env.local.example`, … all slipped through.)
+.env*
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -40,5 +43,3 @@ yarn-error.*
 /ios
 /android
 
-# env with possible public anon keys
-.env

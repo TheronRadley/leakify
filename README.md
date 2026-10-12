@@ -60,10 +60,37 @@ mode) or *Explore the demo* in onboarding.
 Cloud mode is **opt-in** and fully disabled until configured.
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Run the schema: paste `supabase/migrations/0001_initial_schema.sql` into the SQL editor
-   (or `supabase db push` with the CLI).
-3. Enable Email auth in *Authentication → Providers*.
-4. Configure the app with **public** env vars (anon key only — service keys must never ship):
+2. Run the schema — **all** files in `supabase/migrations/`, in filename order
+   (`supabase db push` with the CLI, or paste each into the SQL editor):
+   `0001_initial_schema.sql` (tables + RLS), `0002_subscription_ownership.sql` (composite
+   foreign keys that make cross-user attachment impossible), `0003_notification_privacy.sql`.
+3. In *Authentication*:
+   - **Providers → Email**: enable it, and turn **on** "Confirm email" unless you want
+     accounts created without verification.
+   - **URL Configuration**: set the **Site URL** to your deployed web host, and add these
+     **exact** redirect URLs (wildcards only apply below the path):
+     | Platform | Redirect URL |
+     |---|---|
+     | Web | `https://<your-web-host>/auth-callback` |
+     | iOS / Android release | `leakify://auth-callback` |
+     | Expo dev client | `exp://127.0.0.1:8081/--/auth-callback` |
+
+     Password-recovery emails go to `auth-callback`, which exchanges the **PKCE** code for a
+     session and routes to the "choose a new password" screen. A redirect URL that is not
+     allow-listed makes Supabase fall back to the Site URL, and the link opens in a browser
+     instead of the app.
+4. Deploy the account-deletion function (required for "Delete all my data" to remove the
+   account itself, not just its rows):
+
+   ```bash
+   supabase functions deploy delete-account --no-verify-jwt
+   ```
+
+   It verifies the caller's JWT server-side, deletes every row that user owns, then deletes
+   the `auth.users` row through the Admin API. The service-role key it needs is injected by
+   the Edge Runtime and never reaches the app. Without it, the app still deletes all rows and
+   tells the user honestly that the sign-in account itself remains.
+5. Configure the app with **public** env vars (anon key only — service keys must never ship):
 
 ```bash
 # .env (gitignored)
@@ -71,13 +98,19 @@ EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
 ```
 
-5. Restart the dev server. "Sign in & sync" appears on onboarding / sign-in screens.
+6. Restart the dev server. "Sign in & sync" appears on onboarding / sign-in screens.
 
-Authorization is enforced by **Row Level Security policies** in the migration — every table
+Authorization is enforced by **Row Level Security policies** in the migrations — every table
 (`profiles`, `subscriptions`, `billing_events`, `notification_preferences`,
-`notification_records`) only exposes rows where `auth.uid() = user_id`. The repositories in
-`services/supabase-repository.ts` also scope every query client-side, but the database is
-the real boundary.
+`notification_records`) only exposes rows where `auth.uid() = user_id`, and child tables
+reference `subscriptions (id, user_id)` so a row can never point at somebody else's
+subscription. The repositories in `services/supabase-repository.ts` also scope every query
+client-side, but the database is the real boundary.
+
+**Hosting the web build:** the export is static, so security headers are your host's job.
+Set at minimum `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer` and `Strict-Transport-Security`. Web sessions live in
+`localStorage`, which makes CSP the thing that actually protects them.
 
 ## 🧭 Project structure
 
@@ -136,18 +169,26 @@ are dropped, and the schedule is capped under the iOS 64-notification limit.
 
 ```bash
 npm run typecheck   # tsc --noEmit (strict)
-npm run lint        # eslint (expo flat config)
-npm test            # 109 unit/integration tests
+npm run lint        # eslint (expo flat config) — CI runs it with --max-warnings=0
+npm test            # unit, integration and database suites (jest)
 ```
+
+CI (`.github/workflows/ci.yml`) runs all three plus a non-UTC test pass, a web export and
+secret/dependency scanning on every pull request.
 
 Test coverage includes: recurrence & leap-year math, every billing interval, currency
 separation/formatting/rounding, reminder scheduling, dedup & cancellation of reminders,
-duplicate detection, repository CRUD + cancellation-state transitions + payment recording,
-demo-seeding scoping, form validation, renewal clusters and recorded-spend trends.
+lock-screen privacy copy, duplicate detection, repository CRUD + cancellation-state
+transitions + payment recording (including retry-after-partial-failure), demo-seeding
+scoping, form validation, external-link policy, auth deep-link parsing, local-storage
+schema versioning & corruption handling, export/restore round-tripping, and mode-transition
+warnings.
 
-> User-level access control at the **database** level (RLS) is enforced by migration
-> policies; the client-side scope is covered by tests (`LocalSubscriptionRepository`
-> user isolation). RLS verification requires a running Supabase project (see section above).
+**RLS is tested against a real database.** `supabase/tests/` boots the project's actual
+migrations inside an in-memory Postgres (PGlite — no Docker, no credentials) and exercises
+them as two different authenticated users: cross-user read/insert/update/delete, the
+composite foreign keys, cascade behaviour, and policy presence. One test deliberately runs
+the *pre-0002* schema to prove the cross-user attach it guards against really was possible.
 
 ## 🧱 Tech
 
@@ -160,6 +201,11 @@ lucide-react-native · jest-expo.
 - **Web**: no native local notifications (in-app reminders inbox still works).
 - **Expo Go (Android)**: remote push tokens are unavailable since SDK 53; local scheduling
   works, but a dev build is the tested target for reminders.
-- **Auth on web**: Supabase email links need your deployed URL in Supabase redirect allow-list.
+- **Auth links**: recovery emails use PKCE and must open on the device that requested them —
+  the code verifier lives in that device's secure storage. Redirect URLs must be allow-listed
+  exactly (see the Supabase section).
+- **Android backup**: disabled on purpose (`plugins/with-android-backup-policy.js`) because
+  local-mode data is stored unencrypted. The trade-off is that a reinstall or a new phone
+  starts empty — use *Export my data* / *Restore from backup* to move data across.
 - iOS builds require macOS/Xcode or EAS — not verifiable in CI sandbox; the JS bundle is
   verified via `expo export`.

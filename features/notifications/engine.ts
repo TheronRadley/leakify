@@ -43,6 +43,15 @@ export const REMINDER_FIRE_HOUR = 9;
 
 export type ReminderType = 'renewal' | 'trial';
 
+/**
+ * Lock-screen copy mode.
+ * - `detailed`: name + amount in the title (default; convenient, but visible to
+ *   anyone who can see the device's lock screen or notification shade).
+ * - `generic`: no subscription name and no amount anywhere in the notification.
+ *   The user opts in via Settings → "Hide details on the lock screen".
+ */
+export type NotificationTextMode = 'detailed' | 'generic';
+
 export interface ReminderPlan {
   /** `${subscriptionId}:${occurrenceDate}:${type}:${leadDays}` — stable dedup key. */
   key: string;
@@ -63,13 +72,24 @@ export interface DigestPlan {
   body: string;
 }
 
+/**
+ * Deterministic dedup key.
+ *
+ * The text mode is part of the key on purpose: flipping the lock-screen
+ * privacy setting must RESCHEDULE existing reminders (old keys become obsolete
+ * and get cancelled), not leave the detailed copy sitting on the OS. Detailed
+ * keeps the historical key format so already-scheduled notifications survive
+ * an app update untouched.
+ */
 export function reminderKey(
   subscriptionId: string,
   occurrenceDate: string,
   type: ReminderType,
   leadDays: number,
+  textMode: NotificationTextMode = 'detailed',
 ): string {
-  return `${subscriptionId}:${occurrenceDate}:${type}:${leadDays}`;
+  const base = `${subscriptionId}:${occurrenceDate}:${type}:${leadDays}`;
+  return textMode === 'generic' ? `${base}:generic` : base;
 }
 
 /** True when the subscription should schedule reminders right now. */
@@ -116,7 +136,20 @@ export function renewalCopy(
   occurrenceDate: string,
   leadDays: number,
   refISO: string,
+  textMode: NotificationTextMode = 'detailed',
 ): { title: string; body: string } {
+  const daysText = `in ${leadDays} day${leadDays === 1 ? '' : 's'}`;
+  if (textMode === 'generic') {
+    return leadDays === 0
+      ? {
+          title: 'A subscription bills today',
+          body: 'Open Leakify to see which one, and decide before it charges.',
+        }
+      : {
+          title: `A subscription renews ${daysText}`,
+          body: 'Open Leakify to see the name and amount.',
+        };
+  }
   const amount = formatMoney(amountCents, currency);
   if (leadDays === 0) {
     return {
@@ -126,7 +159,7 @@ export function renewalCopy(
   }
   const when = relativeDayLabel(occurrenceDate, refISO) ?? `on ${occurrenceDate}`;
   return {
-    title: `Your ${name} renewal is coming up ${when === 'Tomorrow' ? 'tomorrow' : `in ${leadDays} day${leadDays === 1 ? '' : 's'}`} — ${amount}`,
+    title: `Your ${name} renewal is coming up ${when === 'Tomorrow' ? 'tomorrow' : daysText} — ${amount}`,
     body: `Charged ${when}. Cancel or pause before then if you no longer need it.`,
   };
 }
@@ -136,7 +169,20 @@ export function trialCopy(
   occurrenceDate: string,
   leadDays: number,
   refISO: string,
+  textMode: NotificationTextMode = 'detailed',
 ): { title: string; body: string } {
+  const daysText = `in ${leadDays} day${leadDays === 1 ? '' : 's'}`;
+  if (textMode === 'generic') {
+    return leadDays === 0
+      ? {
+          title: 'A free trial ends today',
+          body: 'Open Leakify to review it before you are charged.',
+        }
+      : {
+          title: `A free trial ends ${daysText}`,
+          body: 'Open Leakify to see which one before you are charged.',
+        };
+  }
   if (leadDays === 0) {
     return {
       title: `Your ${name} free trial ends today`,
@@ -144,7 +190,7 @@ export function trialCopy(
     };
   }
   const when = relativeDayLabel(occurrenceDate, refISO);
-  const whenText = when === 'Tomorrow' ? 'tomorrow' : `in ${leadDays} day${leadDays === 1 ? '' : 's'}`;
+  const whenText = when === 'Tomorrow' ? 'tomorrow' : daysText;
   return {
     title: `Your ${name} free trial ends ${whenText}`,
     body: 'Review it before you are charged. Cancel in time to avoid the payment.',
@@ -155,6 +201,8 @@ export interface EngineOptions {
   horizonDays?: number;
   /** Current local ISO datetime, injected for testability. */
   nowISO?: string;
+  /** Hide subscription names and amounts from the lock screen (audit S-07). */
+  genericText?: boolean;
 }
 
 /**
@@ -164,6 +212,7 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
   const now = options.nowISO ? new Date(options.nowISO) : new Date();
   const refISO = toISODate(now);
   const horizonDays = options.horizonDays ?? DEFAULT_HORIZON_DAYS;
+  const textMode: NotificationTextMode = options.genericText ? 'generic' : 'detailed';
   const plans: ReminderPlan[] = [];
 
   for (const sub of subs) {
@@ -176,9 +225,9 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
         for (const lead of prefs.renewalLeadDays) {
           const trigger = triggerDateTime(occurrenceDate, lead);
           if (!trigger || trigger.getTime() <= now.getTime()) continue;
-          const copy = renewalCopy(sub.name, sub.amountCents, sub.currency, occurrenceDate, lead, refISO);
+          const copy = renewalCopy(sub.name, sub.amountCents, sub.currency, occurrenceDate, lead, refISO, textMode);
           plans.push({
-            key: reminderKey(sub.id, occurrenceDate, 'renewal', lead),
+            key: reminderKey(sub.id, occurrenceDate, 'renewal', lead, textMode),
             subscriptionId: sub.id,
             type: 'renewal',
             occurrenceDate,
@@ -196,9 +245,9 @@ export function computeReminderPlans(subs: Subscription[], options: EngineOption
         for (const lead of prefs.trialLeadDays) {
           const trigger = triggerDateTime(sub.trialEndDate!, lead);
           if (!trigger || trigger.getTime() <= now.getTime()) continue;
-          const copy = trialCopy(sub.name, sub.trialEndDate!, lead, refISO);
+          const copy = trialCopy(sub.name, sub.trialEndDate!, lead, refISO, textMode);
           plans.push({
-            key: reminderKey(sub.id, sub.trialEndDate!, 'trial', lead),
+            key: reminderKey(sub.id, sub.trialEndDate!, 'trial', lead, textMode),
             subscriptionId: sub.id,
             type: 'trial',
             occurrenceDate: sub.trialEndDate!,

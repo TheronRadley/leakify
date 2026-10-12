@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   RepositoryError,
+  type AccountDeletionResult,
   type BillingEventRepository,
   type NotificationSettingsRepository,
   type ProfileRepository,
@@ -206,26 +207,41 @@ export class SupabaseSubscriptionRepository implements SubscriptionRepository {
     if (!sub) throw new RepositoryError('not_found', 'Subscription not found.');
     if (!sub.nextBillingDate) throw new RepositoryError('validation', 'No next billing date to roll forward.');
 
-    // Roll the billing date forward locally, then persist both records in a
-    // two-step write. The DB has no cross-table RPC here on purpose — keeping
-    // logic client-visible and auditable.
+    // Two-step write (event, then roll the date forward) — there is no
+    // cross-table transaction from the client, and that is deliberate: the
+    // logic stays client-visible and auditable. The step is made *recoverable*
+    // instead of atomic by keying the event on the occurrence it records: a
+    // retry after a partial failure finds the event that is already there and
+    // skips the insert, so a failed pair can never produce a duplicate charge
+    // record (audit N-04).
     const { addInterval, parseISODate, toISODate } = await import('@/lib/dates');
     const anchor = parseISODate(sub.nextBillingDate);
     if (!anchor) throw new RepositoryError('validation', 'Saved billing date is invalid.');
     const next = toISODate(addInterval(anchor, sub.interval, 1));
 
-    const { error: eventError } = await this.db.from('billing_events').insert({
-      subscription_id: sub.id,
-      user_id: this.userId,
-      expected_date: sub.nextBillingDate,
-      amount_cents: sub.amountCents,
-      currency: sub.currency,
-      type: sub.status === 'trialing' ? 'trial_end' : 'renewal',
-      status: 'charged',
-      actual_date: actualDateISO,
-      actual_amount_cents: actualAmountCents,
-    });
-    if (eventError) throw toRepoError(eventError);
+    const { data: existing, error: lookupError } = await this.db
+      .from('billing_events')
+      .select('id')
+      .eq('subscription_id', sub.id)
+      .eq('user_id', this.userId)
+      .eq('expected_date', sub.nextBillingDate);
+    if (lookupError) throw toRepoError(lookupError);
+    const alreadyRecorded = Array.isArray(existing) && existing.length > 0;
+
+    if (!alreadyRecorded) {
+      const { error: eventError } = await this.db.from('billing_events').insert({
+        subscription_id: sub.id,
+        user_id: this.userId,
+        expected_date: sub.nextBillingDate,
+        amount_cents: sub.amountCents,
+        currency: sub.currency,
+        type: sub.status === 'trialing' ? 'trial_end' : 'renewal',
+        status: 'charged',
+        actual_date: actualDateISO,
+        actual_amount_cents: actualAmountCents,
+      });
+      if (eventError) throw toRepoError(eventError);
+    }
     return this.update(id, {
       nextBillingDate: next,
       ...(sub.status === 'trialing' ? { status: 'active' as const } : {}),
@@ -352,13 +368,83 @@ export class SupabaseProfileRepository implements ProfileRepository {
     };
   }
 
-  /** Removes all user data, then lets the caller delete the auth user (needs a server-side function). */
-  async deleteAccountData(): Promise<void> {
-    await this.db.from('subscriptions').delete().eq('user_id', this.userId);
-    await this.db.from('billing_events').delete().eq('user_id', this.userId);
-    await this.db.from('notification_records').delete().eq('user_id', this.userId);
-    await this.db.from('profiles').delete().eq('id', this.userId);
+  /**
+   * Delete everything, including the auth account itself.
+   *
+   * Preferred path: the `delete-account` Edge Function (supabase/functions/
+   * delete-account). It verifies the caller's JWT server-side, deletes every
+   * row owned by that user, then removes the `auth.users` row through the
+   * Admin API — which also drops sessions, refresh tokens, identities and MFA
+   * factors. The service-role key it needs never leaves the server.
+   *
+   * Fallback (function not deployed / call failed): delete the rows the client
+   * is allowed to delete and report honestly that the auth account survived.
+   * The UI shows `warning` rather than claiming a full account deletion.
+   */
+  async deleteAccountData(): Promise<AccountDeletionResult> {
+    let invokeError: unknown = null;
+    try {
+      const { error } = await this.db.functions.invoke(DELETE_ACCOUNT_FUNCTION);
+      invokeError = error;
+    } catch (err) {
+      invokeError = err;
+    }
+    if (!invokeError) {
+      return { rowsDeleted: true, accountDeleted: true };
+    }
+
+    const rowsDeleted = await this.deleteOwnedRows();
+    const status = functionErrorStatus(invokeError);
+    const missing =
+      status === 404 ||
+      status === 501 ||
+      /not found|not deployed|no function|edge function/i.test(errorMessage(invokeError));
+    return {
+      rowsDeleted,
+      accountDeleted: false,
+      warning: missing
+        ? 'Your Leakify data was deleted, but the sign-in account could not be removed because the delete-account function is not deployed on this Supabase project. Ask support@leakify.app to finish removing it.'
+        : 'Your Leakify data was deleted, but the sign-in account could not be removed just now. Try again, or ask support@leakify.app to finish removing it.',
+    };
   }
+
+  /**
+   * Deletes every row this user owns. `notification_preferences` is included —
+   * it was missed before, so preference rows outlived "delete all my data"
+   * (audit N-02). Order: children first, then subscriptions, then the profile.
+   * Each failure is collected rather than thrown so one stubborn table cannot
+   * leave the others behind.
+   */
+  private async deleteOwnedRows(): Promise<boolean> {
+    const targets: { table: string; column: string }[] = [
+      { table: 'notification_records', column: 'user_id' },
+      { table: 'billing_events', column: 'user_id' },
+      { table: 'notification_preferences', column: 'user_id' },
+      { table: 'subscriptions', column: 'user_id' },
+      { table: 'profiles', column: 'id' },
+    ];
+    let allDeleted = true;
+    for (const { table, column } of targets) {
+      const { error } = await this.db.from(table).delete().eq(column, this.userId);
+      if (error) allDeleted = false;
+    }
+    return allDeleted;
+  }
+}
+
+/** Name of the server-side deletion function (supabase/functions/delete-account). */
+export const DELETE_ACCOUNT_FUNCTION = 'delete-account';
+
+function functionErrorStatus(error: unknown): number | null {
+  const context = (error as { context?: unknown } | null)?.context;
+  const status = (context as { status?: unknown } | null)?.status;
+  return typeof status === 'number' ? status : null;
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' ? message : '';
 }
 
 export class SupabaseNotificationSettingsRepository implements NotificationSettingsRepository {
@@ -378,6 +464,7 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
         renewalLeadDays: [3, 1, 0],
         trialLeadDays: [1],
         weeklyDigestEnabled: false,
+        genericLockScreenText: false,
         permissionStatus: 'unknown',
       };
     }
@@ -385,11 +472,13 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
       renewal_lead_days: number[];
       trial_lead_days: number[];
       weekly_digest_enabled: boolean;
+      generic_lock_screen_text: boolean | null;
     };
     return {
       renewalLeadDays: row.renewal_lead_days ?? [3, 1, 0],
       trialLeadDays: row.trial_lead_days ?? [1],
       weeklyDigestEnabled: row.weekly_digest_enabled ?? false,
+      genericLockScreenText: row.generic_lock_screen_text ?? false,
       permissionStatus: 'unknown',
     };
   }
@@ -399,6 +488,7 @@ export class SupabaseNotificationSettingsRepository implements NotificationSetti
     if (patch.renewalLeadDays !== undefined) row.renewal_lead_days = patch.renewalLeadDays;
     if (patch.trialLeadDays !== undefined) row.trial_lead_days = patch.trialLeadDays;
     if (patch.weeklyDigestEnabled !== undefined) row.weekly_digest_enabled = patch.weeklyDigestEnabled;
+    if (patch.genericLockScreenText !== undefined) row.generic_lock_screen_text = patch.genericLockScreenText;
     const { error } = await this.db.from('notification_preferences').upsert(row);
     if (error) throw toRepoError(error);
     return { ...(await this.get()), permissionStatus: patch.permissionStatus ?? 'unknown' };
