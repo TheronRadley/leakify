@@ -1,10 +1,22 @@
 import { LeakifyLogo } from '@/components/branding/logo';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { FormField } from '@/components/shared/form-field';
 import { Screen } from '@/components/shared/screen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Link as UILink, Text } from '@/components/ui/auth-bits';
 import { useAuth } from '@/features/auth/auth-context';
+import { assessModeTransition } from '@/features/subscriptions/mode-transition';
+import { countLocalSubscriptions } from '@/features/subscriptions/store';
 import { APP_TAGLINE } from '@/lib/constants';
 import { signInSchema, type SignInValues } from '@/lib/validation';
 import { isSupabaseConfigured } from '@/services/supabase';
@@ -25,7 +37,34 @@ export default function SignInScreen() {
     defaultValues: { email: '', password: '' },
   });
 
-  const onSubmit = handleSubmit(async (values) => {
+  /**
+   * Signing in switches the store to the cloud scope. On-device data is not
+   * uploaded and not deleted — it just stops being the thing on screen — so we
+   * say that out loud before it happens instead of letting it look like loss
+   * (audit U-04 / N-03).
+   */
+  const [localCount, setLocalCount] = React.useState(0);
+  const [pendingSignIn, setPendingSignIn] = React.useState<SignInValues | null>(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    countLocalSubscriptions()
+      .then((count) => {
+        if (mounted) setLocalCount(count);
+      })
+      .catch(() => undefined); // unreadable local storage must not block sign-in
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const advice = assessModeTransition({
+    from: localCount > 0 ? 'local' : null,
+    to: 'supabase',
+    itemCount: localCount,
+  });
+
+  const performSignIn = async (values: SignInValues) => {
     setServerError(null);
     setBusy('signin');
     try {
@@ -36,6 +75,14 @@ export default function SignInScreen() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const onSubmit = handleSubmit(async (values) => {
+    if (advice.requiresConfirmation) {
+      setPendingSignIn(values);
+      return;
+    }
+    await performSignIn(values);
   });
 
   const startDemo = async () => {
@@ -115,6 +162,34 @@ export default function SignInScreen() {
             <Text variant="muted">·</Text>
             <UILink href="/(auth)/sign-up">Create account</UILink>
           </View>
+
+          <AlertDialog
+            open={pendingSignIn !== null}
+            onOpenChange={(next) => {
+              if (!next) setPendingSignIn(null);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{advice.headline}</AlertDialogTitle>
+                <AlertDialogDescription>{advice.detail}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>
+                  <Text>Not now</Text>
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onPress={() => {
+                    const values = pendingSignIn;
+                    setPendingSignIn(null);
+                    if (values) void performSignIn(values);
+                  }}
+                >
+                  <Text>Continue</Text>
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </View>
       ) : (
         <View className="gap-4 px-1">

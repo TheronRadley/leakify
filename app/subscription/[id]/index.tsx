@@ -40,7 +40,7 @@ import {
 import { categoryLabel } from '@/lib/constants';
 import { formatMoney } from '@/lib/currency';
 import { formatDisplayDate, isValidISODate, relativeDayLabel, todayISO } from '@/lib/dates';
-import type { BillingEvent } from '@/types';
+import type { BillingEvent, Subscription } from '@/types';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Archive,
@@ -57,7 +57,7 @@ import {
   Receipt,
   Trash2,
 } from 'lucide-react-native';
-import * as Linking from 'expo-linking';
+import { openExternalUrl } from '@/services/external-links';
 import * as React from 'react';
 import { View } from 'react-native';
 
@@ -96,6 +96,22 @@ export default function SubscriptionDetailScreen() {
       setBusy(false);
     }
   }, []);
+
+  /**
+   * Re-validated at open time (lib/links.ts), not just when the URL was saved:
+   * rows can predate the HTTPS-only policy, and a refused link must explain
+   * itself instead of doing nothing.
+   */
+  const openCancellationLink = React.useCallback(
+    async (subscription: Subscription) => {
+      setBusy(true);
+      setActionError(null);
+      const result = await openExternalUrl(subscription.cancellationUrl);
+      if (!result.opened) setActionError(result.message);
+      setBusy(false);
+    },
+    [],
+  );
 
   if (!sub) {
     return (
@@ -296,7 +312,7 @@ export default function SubscriptionDetailScreen() {
           <Button
             variant="outline"
             disabled={busy}
-            onPress={() => void Linking.openURL(sub.cancellationUrl!)}
+            onPress={() => void openCancellationLink(sub)}
             accessibilityLabel={`Open cancellation page for ${sub.name}`}
           >
             <Icon as={ExternalLink} size={16} className="text-foreground" />

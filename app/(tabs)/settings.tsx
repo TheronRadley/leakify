@@ -28,6 +28,8 @@ import { Switch } from '@/components/ui/switch';
 import { Text } from '@/components/ui/text';
 import { useAuth } from '@/features/auth/auth-context';
 import { getPermissionStatus, requestPermissions } from '@/features/notifications/service';
+import { ImportDialog } from '@/features/subscriptions/components/import-dialog';
+import { buildExportPayload } from '@/features/subscriptions/import-export';
 import {
   deleteAllAccountData,
   resetDemoData,
@@ -120,6 +122,7 @@ export default function SettingsScreen() {
   const [permission, setPermission] = React.useState<'granted' | 'denied' | 'undetermined'>('undetermined');
   const [busy, setBusy] = React.useState(false);
   const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [deletionWarning, setDeletionWarning] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     void getPermissionStatus().then(setPermission);
@@ -134,12 +137,8 @@ export default function SettingsScreen() {
     setBusy(true);
     setFeedback(null);
     try {
-      const payload = {
-        exportedAt: new Date().toISOString(),
-        app: 'leakify',
-        profile,
-        subscriptions,
-      };
+      // Same builder the restore path reads, so the round trip cannot drift.
+      const payload = buildExportPayload(profile, subscriptions);
       await Share.share({
         message: JSON.stringify(payload, null, 2),
         title: 'Leakify data export',
@@ -151,12 +150,27 @@ export default function SettingsScreen() {
     }
   };
 
+  /**
+   * Deletion is reported, not assumed. If the server-side account removal did
+   * not run, we stay on this screen with the reason visible instead of signing
+   * out into a screen the user cannot read any more.
+   */
   const handleDeleteAccount = async () => {
     setBusy(true);
+    setFeedback(null);
     try {
-      await deleteAllAccountData();
+      const result = await deleteAllAccountData();
+      if (!result.accountDeleted || !result.rowsDeleted) {
+        setDeletionWarning(
+          result.warning ??
+            'Some of your data could not be removed. Please try again, or contact support@leakify.app.',
+        );
+        return;
+      }
       await auth.signOut();
       router.replace('/(auth)/sign-in');
+    } catch {
+      setDeletionWarning('Deletion failed. Please try again, or contact support@leakify.app.');
     } finally {
       setBusy(false);
     }
@@ -334,6 +348,21 @@ export default function SettingsScreen() {
             accessibilityLabel="Weekly digest"
           />
         </View>
+        <Separator />
+        <View className="flex-row items-center justify-between p-4">
+          <View className="flex-1 pr-3">
+            <Text className="font-medium">Hide details on the lock screen</Text>
+            <Text variant="small" className="text-muted-foreground">
+              Notify “A subscription bills today” instead of the name and amount, so
+              reminders stay private on a shared or locked device.
+            </Text>
+          </View>
+          <Switch
+            checked={notificationSettings.genericLockScreenText}
+            onCheckedChange={(checked) => void updateNotificationSettings({ genericLockScreenText: checked })}
+            accessibilityLabel="Hide subscription details in notifications"
+          />
+        </View>
       </Section>
 
       {/* Appearance preview note + demo */}
@@ -363,6 +392,8 @@ export default function SettingsScreen() {
           description={busy ? 'Preparing export…' : 'Share a JSON copy of your profile and subscriptions.'}
           onPress={() => void exportData()}
         />
+        <Separator />
+        <ImportDialog onDone={setFeedback} />
         <Separator />
         <Row
           icon={ShieldCheck}
@@ -437,6 +468,29 @@ export default function SettingsScreen() {
           </AlertDialogContent>
         </AlertDialog>
       </Section>
+
+      {deletionWarning ? (
+        <Card className="mt-6 gap-3 border-destructive/40 bg-destructive/10 p-4">
+          <Text className="font-medium text-destructive">Deletion incomplete</Text>
+          <Text variant="small" className="leading-5 text-foreground" accessibilityRole="alert">
+            {deletionWarning}
+          </Text>
+          <View className="flex-row gap-2">
+            <Button size="sm" variant="outline" loading={busy} onPress={() => void handleDeleteAccount()}>
+              <Text>Try again</Text>
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => {
+                void auth.signOut().then(() => router.replace('/(auth)/sign-in'));
+              }}
+            >
+              <Text className="text-muted-foreground">Sign out anyway</Text>
+            </Button>
+          </View>
+        </Card>
+      ) : null}
 
       {feedback ? (
         <Text variant="small" className="pt-3 text-center text-primary" accessibilityLiveRegion="polite">

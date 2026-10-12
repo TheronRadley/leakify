@@ -108,6 +108,11 @@ export interface NotificationSettings {
   /** Default trial reminders, e.g. [1]. */
   trialLeadDays: number[];
   weeklyDigestEnabled: boolean;
+  /**
+   * Hide subscription names and amounts from notification text so the lock
+   * screen / notification shade never shows what you pay for (audit S-07).
+   */
+  genericLockScreenText: boolean;
   /** Local notification permission as last observed by the app. */
   permissionStatus: 'unknown' | 'granted' | 'denied';
 }

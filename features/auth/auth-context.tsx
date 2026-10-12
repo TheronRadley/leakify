@@ -12,7 +12,12 @@
 import {
   initializeStore,
 } from '@/features/subscriptions/store';
-import { readJSON, storageKeys, writeJSON } from '@/services/local-storage';
+import {
+  humanizeAuthError,
+  type AuthCredentials,
+} from '@/lib/auth-links';
+import { authRedirectUrl } from '@/services/auth-redirect';
+import { readJSON, removeKey, storageKeys, writeJSON } from '@/services/local-storage';
 import { getSupabase, isSupabaseConfigured } from '@/services/supabase';
 import type { AuthUser, DataMode } from '@/types';
 import { useRouter, useSegments } from 'expo-router';
@@ -34,6 +39,10 @@ interface AuthActions {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   recoverPassword: (email: string) => Promise<void>;
+  /** Exchange the code/tokens from an email deep link for a session (no data-mode switch yet). */
+  exchangeAuthCallback: (credentials: AuthCredentials) => Promise<AuthUser>;
+  /** Set the new password from a recovery link and finish entering cloud mode. */
+  completePasswordReset: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -42,6 +51,22 @@ const AuthContext = React.createContext<(AuthState & AuthActions) | null>(null);
 function sessionToUser(session: Session | null): AuthUser | null {
   if (!session?.user) return null;
   return { id: session.user.id, email: session.user.email ?? '' };
+}
+
+/**
+ * Switch the app into cloud mode for an authenticated session: persist the
+ * mode, point the store at the user's scope, update React state.
+ */
+async function adoptSession(
+  session: Session,
+  setState: React.Dispatch<React.SetStateAction<AuthState>>,
+): Promise<AuthUser> {
+  const user = sessionToUser(session);
+  if (!user) throw new Error('Sign-in failed. Please try again.');
+  await writeJSON(storageKeys.dataMode, 'supabase' satisfies DataMode);
+  await initializeStore('supabase', user.id);
+  setState((s) => ({ ...s, dataMode: 'supabase', user }));
+  return user;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -53,10 +78,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const boot = React.useCallback(async () => {
-    const [onboardingDone, savedMode] = await Promise.all([
-      readJSON<boolean>(storageKeys.onboardingCompleted, false),
-      readJSON<DataMode | null>(storageKeys.dataMode, null),
-    ]);
+    // These two keys are a boolean and an enum: if they are unreadable the
+    // recoverable answer is "start from the mode picker". The user's actual
+    // data is validated where it is read (services/local-storage.ts), so real
+    // corruption still surfaces there as an error instead of an empty list.
+    let onboardingDone = false;
+    let savedMode: DataMode | null = null;
+    try {
+      [onboardingDone, savedMode] = await Promise.all([
+        readJSON<boolean>(storageKeys.onboardingCompleted, false),
+        readJSON<DataMode | null>(storageKeys.dataMode, null),
+      ]);
+    } catch {
+      await removeKey(storageKeys.onboardingCompleted).catch(() => undefined);
+      await removeKey(storageKeys.dataMode).catch(() => undefined);
+    }
 
     if (savedMode === 'supabase' && isSupabaseConfigured) {
       const supabase = getSupabase();
@@ -138,11 +174,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const supabase = getSupabase();
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw new Error(mapAuthError(error.message));
-        const user = sessionToUser(data.session);
-        if (!user) throw new Error('Sign-in failed. Please try again.');
-        await writeJSON(storageKeys.dataMode, 'supabase' satisfies DataMode);
-        await initializeStore('supabase', user.id);
-        setState((s) => ({ ...s, dataMode: 'supabase', user }));
+        if (!data.session) throw new Error('Sign-in failed. Please try again.');
+        await adoptSession(data.session, setState);
       },
       signUp: async (email, password, displayName) => {
         if (!isSupabaseConfigured) throw new Error('Cloud accounts are not configured for this build.');
@@ -153,11 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           options: { data: { display_name: displayName } },
         });
         if (error) throw new Error(mapAuthError(error.message));
-        const user = sessionToUser(data.session);
-        if (user) {
-          await writeJSON(storageKeys.dataMode, 'supabase' satisfies DataMode);
-          await initializeStore('supabase', user.id);
-          setState((s) => ({ ...s, dataMode: 'supabase', user }));
+        if (data.session) {
+          await adoptSession(data.session, setState);
         } else {
           // Email confirmation required: user verified by email before session exists.
           throw new Error('Check your inbox to confirm your email, then sign in.');
@@ -166,8 +196,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       recoverPassword: async (email) => {
         if (!isSupabaseConfigured) throw new Error('Cloud sign-in is not configured for this build.');
         const supabase = getSupabase();
-        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        // redirectTo must be allow-listed in the Supabase dashboard, otherwise
+        // the project falls back to its Site URL and the link opens in a
+        // browser instead of the app (audit S-03).
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: authRedirectUrl(),
+        });
         if (error) throw new Error('Could not send the recovery email. Please try again later.');
+      },
+      exchangeAuthCallback: async (credentials) => {
+        if (!isSupabaseConfigured) throw new Error('Cloud sign-in is not configured for this build.');
+        const supabase = getSupabase();
+
+        // On web, supabase-js can complete the PKCE exchange by itself during
+        // startup (detectSessionInUrl). A PKCE code is single-use, so reuse an
+        // existing session instead of exchanging twice.
+        const { data: current } = await supabase.auth.getSession();
+        let session = current.session;
+
+        if (!session) {
+          if (credentials.kind === 'code') {
+            const { data, error } = await supabase.auth.exchangeCodeForSession(credentials.code);
+            if (error) throw new Error(humanizeAuthError(error.message));
+            session = data.session;
+          } else {
+            // Legacy implicit-flow link: tokens arrive in the URL fragment.
+            const { data, error } = await supabase.auth.setSession({
+              access_token: credentials.accessToken,
+              refresh_token: credentials.refreshToken,
+            });
+            if (error) throw new Error(humanizeAuthError(error.message));
+            session = data.session;
+          }
+        }
+        if (!session) throw new Error('That link could not be completed. Request a new one.');
+        const user = sessionToUser(session);
+        if (!user) throw new Error('That link could not be completed. Request a new one.');
+        // Mark onboarding done: an account holder recovering a password on a
+        // fresh device should not be bounced to the intro flow by the route
+        // guard. Data mode is deliberately NOT switched here — the recovery
+        // flow finishes in completePasswordReset, and switching early would
+        // make the guard navigate away from the reset form before it renders.
+        await writeJSON(storageKeys.onboardingCompleted, true);
+        setState((s) => ({ ...s, onboardingCompleted: true }));
+        return user;
+      },
+      completePasswordReset: async (password) => {
+        if (!isSupabaseConfigured) throw new Error('Cloud sign-in is not configured for this build.');
+        const supabase = getSupabase();
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw new Error(mapAuthError(error.message));
+        const { data } = await supabase.auth.getSession();
+        if (!data.session) throw new Error('Password updated, but the session was lost. Please sign in.');
+        await adoptSession(data.session, setState);
       },
       signOut: async () => {
         if (isSupabaseConfigured) {

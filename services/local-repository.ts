@@ -5,9 +5,17 @@
  */
 import { todayISO, toISODate, addInterval, parseISODate } from '@/lib/dates';
 import { DEFAULT_CURRENCY } from '@/lib/constants';
-import { readJSON, removeKey, storageKeys, writeJSON } from '@/services/local-storage';
+import { isSafeExternalUrl } from '@/lib/links';
+import {
+  readStored,
+  readStoredOrNull,
+  removeKey,
+  storageKeys,
+  writeJSON,
+} from '@/services/local-storage';
 import {
   RepositoryError,
+  type AccountDeletionResult,
   type BillingEventRepository,
   type NotificationSettingsRepository,
   type ProfileRepository,
@@ -43,6 +51,15 @@ function assertValidInput(input: Partial<SubscriptionInput>): void {
   if (input.currency !== undefined && !/^[A-Z]{3}$/.test(input.currency)) {
     throw new RepositoryError('validation', 'Currency must be a 3-letter ISO code.');
   }
+  if (input.cancellationUrl !== undefined && input.cancellationUrl !== null) {
+    const value = input.cancellationUrl.trim();
+    if (value.length > 0 && !isSafeExternalUrl(value)) {
+      throw new RepositoryError(
+        'validation',
+        'Cancellation links must be https:// addresses. See the link policy in lib/links.ts.',
+      );
+    }
+  }
 }
 
 export class LocalSubscriptionRepository implements SubscriptionRepository {
@@ -53,7 +70,9 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
   }
 
   protected async readAll(): Promise<Subscription[]> {
-    return readJSON<Subscription[]>(this.key, []);
+    // Validated on read: a payload that cannot be parsed surfaces as a
+    // StorageCorruptionError instead of masquerading as "no subscriptions".
+    return readStored('subscriptions', this.key, []);
   }
 
   protected async writeAll(subs: Subscription[]): Promise<void> {
@@ -149,7 +168,7 @@ export class LocalSubscriptionRepository implements SubscriptionRepository {
 
     // Persist the billing event as history (never fabricate past records).
     const eventsKey = storageKeys.billingEvents(this.scope);
-    const events = await readJSON<BillingEvent[]>(eventsKey, []);
+    const events = await readStored('billingEvents', eventsKey, []);
     const now = new Date().toISOString();
     events.push({
       id: generateId(),
@@ -175,14 +194,14 @@ export class LocalBillingEventRepository implements BillingEventRepository {
   constructor(private readonly scope: string) {}
 
   async listForSubscription(subscriptionId: string): Promise<BillingEvent[]> {
-    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), []);
+    const events = await readStored('billingEvents', storageKeys.billingEvents(this.scope), []);
     return events
       .filter((e) => e.subscriptionId === subscriptionId)
       .sort((a, b) => b.expectedDate.localeCompare(a.expectedDate));
   }
 
   async listAll(): Promise<BillingEvent[]> {
-    const events = await readJSON<BillingEvent[]>(storageKeys.billingEvents(this.scope), []);
+    const events = await readStored('billingEvents', storageKeys.billingEvents(this.scope), []);
     return events.sort((a, b) => b.expectedDate.localeCompare(a.expectedDate));
   }
 }
@@ -191,6 +210,7 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   renewalLeadDays: [3, 1, 0],
   trialLeadDays: [1],
   weeklyDigestEnabled: false,
+  genericLockScreenText: false,
   permissionStatus: 'unknown',
 };
 
@@ -198,8 +218,8 @@ export class LocalNotificationSettingsRepository implements NotificationSettings
   constructor(private readonly scope: string) {}
 
   async get(): Promise<NotificationSettings> {
-    const stored = await readJSON<NotificationSettings | null>(storageKeys.notificationSettings(this.scope), null);
-    return stored ?? DEFAULT_NOTIFICATION_SETTINGS;
+    const stored = await readStoredOrNull('notificationSettings', storageKeys.notificationSettings(this.scope));
+    return { ...DEFAULT_NOTIFICATION_SETTINGS, ...(stored ?? {}) };
   }
 
   async update(patch: Partial<NotificationSettings>): Promise<NotificationSettings> {
@@ -213,7 +233,7 @@ export class LocalScheduledNotificationRepository implements ScheduledNotificati
   constructor(private readonly scope: string) {}
 
   async list(): Promise<ScheduledNotification[]> {
-    return readJSON<ScheduledNotification[]>(storageKeys.scheduledNotifications(this.scope), []);
+    return readStored('scheduledNotifications', storageKeys.scheduledNotifications(this.scope), []);
   }
 
   async saveAll(records: ScheduledNotification[]): Promise<void> {
@@ -234,7 +254,7 @@ export class LocalProfileRepository implements ProfileRepository {
   constructor(private readonly scope: string) {}
 
   async get(): Promise<Profile | null> {
-    const stored = await readJSON<Profile | null>(storageKeys.profile(this.scope), null);
+    const stored = await readStoredOrNull('profile', storageKeys.profile(this.scope));
     if (stored) return stored;
     if (this.scope === 'demo') {
       const now = new Date().toISOString();
@@ -262,12 +282,18 @@ export class LocalProfileRepository implements ProfileRepository {
     return next;
   }
 
-  async deleteAccountData(): Promise<void> {
+  /**
+   * Wipes every storage key this scope owns. There is no account to destroy in
+   * local / demo mode, so `accountDeleted` is true by definition — nothing
+   * identifying survives on the device once these keys are gone.
+   */
+  async deleteAccountData(): Promise<AccountDeletionResult> {
     await removeKey(storageKeys.subscriptions(this.scope));
     await removeKey(storageKeys.profile(this.scope));
     await removeKey(storageKeys.notificationSettings(this.scope));
     await removeKey(storageKeys.scheduledNotifications(this.scope));
     await removeKey(storageKeys.billingEvents(this.scope));
+    return { rowsDeleted: true, accountDeleted: true };
   }
 }
 

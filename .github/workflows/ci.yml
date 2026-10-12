@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # The ship gate from AGENTS.md: typecheck, lint, tests, and a web bundle.
+  # The RLS / composite-FK suite (supabase/tests) runs inside `npm test` against
+  # a real Postgres (PGlite), so it needs no Docker, credentials or live project.
+  verify:
+    name: Typecheck · lint · test · web export
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        # Zero-warning policy: new warnings fail the build.
+        run: npm run lint -- --max-warnings=0
+
+      - name: Test
+        run: npm test -- --ci
+
+      # Billing dates and reminder triggers are calendar-local, so a suite that
+      # only ever runs in UTC proves less than it looks like.
+      - name: Test in a non-UTC timezone
+        run: TZ=Pacific/Auckland npm test -- --ci
+
+      - name: Export web bundle
+        run: npx expo export --platform web
+
+      - name: Upload web bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-export
+          path: dist
+          if-no-files-found: warn
+          retention-days: 7
+
+  security:
+    name: Secrets · dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: secret scanning is only useful if it sees old commits.
+          fetch-depth: 0
+
+      - name: Scan history for committed secrets
+        run: |
+          docker run --rm -v "$PWD:/repo" \
+            zricethezav/gitleaks:latest \
+            detect --source=/repo --no-banner --redact --exit-code=1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # NON-BLOCKING on purpose, and only for now: the current advisories
+      # (mostly Expo/Metro/jest toolchain, attributed to production because
+      # `expo` and `react-native` sit in `dependencies`) are triaged in
+      # SECURITY.md. Flip this to a failing gate once the residue is cleared.
+      - name: Dependency audit (report only)
+        continue-on-error: true
+        run: |
+          npm audit --omit=dev --audit-level=high | tee npm-audit.txt
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: npm-audit.txt
+          if-no-files-found: ignore
+          retention-days: 14

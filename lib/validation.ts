@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SUPPORTED_CURRENCY_CODES } from '@/lib/constants';
+import { isFormValidUrl } from '@/lib/links';
 import { isValidISODate } from '@/lib/dates';
 
 export const CATEGORY_KEYS = [
@@ -49,12 +50,14 @@ export const subscriptionFormSchema = z
     category: z.enum(CATEGORY_KEYS),
     status: z.enum(['active', 'trialing', 'paused', 'canceled']),
     paymentMethodLabel: z.string().trim().max(40, 'Payment method label is too long'),
+    // HTTPS only, enforced by the shared link policy (lib/links.ts) so the
+    // form and the open-time guard can never disagree.
     cancellationUrl: z
       .string()
       .trim()
       .refine(
-        (v) => v === '' || /^https?:\/\/.+\..+/.test(v),
-        'Enter a valid URL starting with http(s)://',
+        (v) => v === '' || isFormValidUrl(v),
+        'Enter a valid https:// URL',
       ),
     notes: z.string().trim().max(500, 'Notes are too long'),
   })
