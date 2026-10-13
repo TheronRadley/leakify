@@ -1,11 +1,51 @@
 import { Screen } from '@/components/shared/screen';
-import { Card } from '@/components/ui/card';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
+import { Badge } from '@/components/ui/badge';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Icon } from '@/components/ui/icon';
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item';
+import { FadeInView } from '@/components/ui/motion';
 import { Text } from '@/components/ui/text';
 import { useAuth } from '@/features/auth/auth-context';
 import { isSupabaseConfigured } from '@/services/supabase';
-import { Stack } from 'expo-router';
-import { CloudCog, Database, FileText, Fingerprint, Lock, ShieldCheck } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import {
+  ArrowLeft,
+  CloudCog,
+  Database,
+  FileText,
+  Fingerprint,
+  Lock,
+  ShieldCheck,
+} from 'lucide-react-native';
 import * as React from 'react';
 import { View } from 'react-native';
 
@@ -38,44 +78,97 @@ const SECTIONS: { icon: Parameters<typeof Icon>[0]['as']; title: string; body: s
 ];
 
 export default function PrivacyScreen() {
+  const router = useRouter();
   const { dataMode } = useAuth();
   return (
-    <Screen edges={['bottom']}>
-      <Stack.Screen options={{ headerShown: true, title: 'Privacy at Leakify' }} />
-      <View className="gap-1 pb-4 pt-4">
-        <Text variant="h3">Privacy at Leakify</Text>
-        <Text variant="muted" className="leading-5">
-          {`Current mode: ${dataMode ?? 'unknown'}${dataMode === 'supabase' && isSupabaseConfigured ? ' (cloud sync on)' : ''}.`}
-        </Text>
-      </View>
-      <View className="gap-3 pb-10">
-        {SECTIONS.map((section) => (
-          <Card key={section.title} className="gap-2 p-4">
-            <View className="flex-row items-center gap-2.5">
-              <View className="rounded-lg bg-accent p-1.5">
-                <Icon as={section.icon} size={18} className="text-accent-foreground" />
-              </View>
-              <Text className="font-semibold">{section.title}</Text>
-            </View>
-            <Text variant="small" className="leading-5 text-muted-foreground">
-              {section.body}
-            </Text>
-          </Card>
-        ))}
-        <Card className="gap-2 p-4">
-          <View className="flex-row items-center gap-2.5">
-            <View className="rounded-lg bg-accent p-1.5">
-              <Icon as={CloudCog} size={18} className="text-accent-foreground" />
-            </View>
-            <Text className="font-semibold">Bank connections</Text>
-          </View>
-          <Text variant="small" className="leading-5 text-muted-foreground">
-            Leakify currently has no bank integration enabled. If one is added later, it will
-            require your explicit consent, clearly name the provider, and never store your
-            banking credentials on device or server.
-          </Text>
+    <Screen edges={['top', 'bottom']} className="gap-5">
+      <FadeInView delay={0} className="flex-row flex-wrap items-center justify-between gap-3">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink onPress={() => router.push('/(tabs)/settings')}>
+                <Text className="text-xs text-muted-foreground">Settings</Text>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage className="text-xs font-medium">Privacy at Leakify</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onPress={() => (router.canGoBack() ? router.back() : router.push('/(tabs)/settings'))}
+          accessibilityLabel="Back"
+        >
+          <Icon as={ArrowLeft} size={15} className="text-foreground" />
+          <Text>Back</Text>
+        </Button>
+      </FadeInView>
+
+      <FadeInView delay={60} className="gap-5">
+        <Card className="gap-4">
+          <CardHeader>
+            <CardTitle>Privacy at Leakify</CardTitle>
+            <CardDescription>
+              {`Current mode: ${dataMode ?? 'unknown'}${dataMode === 'supabase' && isSupabaseConfigured ? ' (cloud sync on)' : ''}.`}
+            </CardDescription>
+            <CardAction>
+              <Badge variant="outline">
+                <Text>{dataMode ?? 'local'}</Text>
+              </Badge>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <ItemGroup className="gap-2.5">
+              {SECTIONS.map((section) => (
+                <Item
+                  key={section.title}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-lg bg-muted/20"
+                >
+                  <ItemMedia variant="icon">
+                    <Icon as={section.icon} size={16} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle className="font-semibold">{section.title}</ItemTitle>
+                    <ItemDescription className="text-xs leading-5">{section.body}</ItemDescription>
+                  </ItemContent>
+                </Item>
+              ))}
+            </ItemGroup>
+          </CardContent>
         </Card>
-      </View>
+
+        <Card className="gap-2">
+          <CardHeader>
+            <CardTitle>Architecture & Bank Connections</CardTitle>
+            <CardDescription>Technical details on third-party integrations</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Accordion type="single" collapsible defaultValue="bank">
+              <AccordionItem value="bank">
+                <AccordionTrigger>
+                  <View className="flex-row items-center gap-2">
+                    <Icon as={CloudCog} size={15} className="text-muted-foreground" />
+                    <Text className="font-medium">Bank connections</Text>
+                  </View>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <Text variant="small" className="text-xs leading-5 text-muted-foreground">
+                    Leakify currently has no bank integration enabled. If one is added later, it
+                    will require your explicit consent, clearly name the provider, and never store
+                    your banking credentials on device or server.
+                  </Text>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </CardContent>
+        </Card>
+      </FadeInView>
     </Screen>
   );
 }

@@ -6,6 +6,7 @@ import { AuthProvider, useAuth, useRouteGuard } from '@/features/auth/auth-conte
 import { configureNotificationHandler } from '@/features/notifications/service';
 import { useNotificationSync } from '@/features/notifications/use-notification-sync';
 import { useDataStore } from '@/features/subscriptions/store';
+import { APP_TAGLINE } from '@/lib/constants';
 import { ThemeProvider, useSemanticColors } from '@/lib/theme';
 import { PortalHost } from '@rn-primitives/portal';
 import { Stack } from 'expo-router';
@@ -13,7 +14,6 @@ import { StatusBar } from 'expo-status-bar';
 import * as React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { APP_TAGLINE } from '@/lib/constants';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -31,7 +31,6 @@ function SplashScreen() {
 }
 
 function NotificationBootstrap() {
-  // Set the foreground handler once; safe on web (no-op).
   if (!NotificationBootstrap.done) {
     NotificationBootstrap.done = true;
     configureNotificationHandler();
@@ -63,23 +62,23 @@ function RootStack() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen
             name="subscription/new"
-            options={{ presentation: 'modal', headerShown: true, title: 'Add Subscription' }}
+            options={{ presentation: 'modal', headerShown: false }}
           />
           <Stack.Screen
             name="subscription/[id]/index"
-            options={{ headerShown: true, title: '', headerBackTitle: 'Back' }}
+            options={{ headerShown: false }}
           />
           <Stack.Screen
             name="subscription/[id]/edit"
-            options={{ presentation: 'modal', headerShown: true, title: 'Edit Subscription' }}
+            options={{ presentation: 'modal', headerShown: false }}
           />
           <Stack.Screen
             name="savings"
-            options={{ presentation: 'modal', headerShown: true, title: 'Potential Savings' }}
+            options={{ presentation: 'modal', headerShown: false }}
           />
           <Stack.Screen
             name="reminders"
-            options={{ presentation: 'modal', headerShown: true, title: 'Upcoming Reminders' }}
+            options={{ presentation: 'modal', headerShown: false }}
           />
           <Stack.Screen name="privacy" options={{ headerShown: false }} />
         </Stack>

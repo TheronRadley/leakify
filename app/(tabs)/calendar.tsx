@@ -1,196 +1,375 @@
-import { CategoryIcon } from '@/components/shared/category-icon';
 import { CurrencyTotalsText, MoneyText } from '@/components/shared/money';
 import { Screen } from '@/components/shared/screen';
-import { EmptyState, LoadingSkeleton } from '@/components/shared/state-views';
+import { EmptyState, ErrorState, LoadingSkeleton } from '@/components/shared/state-views';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { ButtonGroup } from '@/components/ui/button-group';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Icon } from '@/components/ui/icon';
-import { Separator } from '@/components/ui/separator';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from '@/components/ui/item';
+import { FadeInView } from '@/components/ui/motion';
 import { Text } from '@/components/ui/text';
 import {
   buildMonthGrid,
   chargesForMonth,
-  chargesOnDate,
   cursorFor,
   monthTitle,
   shiftMonth,
   totalsForDay,
+  type DayCharge,
 } from '@/features/calendar/utils';
-import { useSubscriptions } from '@/features/subscriptions/store';
+import { refreshSubscriptions, useDataStore } from '@/features/subscriptions/store';
+import { formatDisplayDate, todayISO } from '@/lib/dates';
 import { cn } from '@/lib/utils';
-import { todayISO } from '@/lib/dates';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 
-const WEEKDAYS_MON_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function CalendarScreen() {
   const router = useRouter();
-  const { subscriptions, status } = useSubscriptions();
-  const todayStr = todayISO();
+  const { subscriptions, status, error } = useDataStore();
   const [cursor, setCursor] = React.useState(() => cursorFor(new Date()));
-  const [selectedISO, setSelectedISO] = React.useState(todayStr);
+  const [selectedIso, setSelectedIso] = React.useState<string>(() => todayISO());
 
-  const grid = React.useMemo(() => buildMonthGrid(cursor.year, cursor.monthIndex, 1), [cursor]);
-  const monthCharges = React.useMemo(() => chargesForMonth(subscriptions, cursor), [subscriptions, cursor]);
-  const selectedCharges = React.useMemo(
-    () => chargesOnDate(subscriptions, selectedISO),
-    [subscriptions, selectedISO],
+  const liveSubs = React.useMemo(
+    () => subscriptions.filter((s) => !s.archivedAt),
+    [subscriptions],
   );
-  const selectedTotals = React.useMemo(() => totalsForDay(selectedCharges), [selectedCharges]);
 
-  if (status === 'loading' || status === 'idle') return <LoadingSkeleton />;
+  const cells = React.useMemo(
+    () => buildMonthGrid(cursor.year, cursor.monthIndex, 1),
+    [cursor.year, cursor.monthIndex],
+  );
+
+  const monthChargeMap = React.useMemo(
+    () => chargesForMonth(liveSubs, cursor),
+    [liveSubs, cursor],
+  );
+
+  const allMonthCharges = React.useMemo(() => {
+    const list: { date: string; charge: DayCharge }[] = [];
+    for (const [date, charges] of monthChargeMap.entries()) {
+      for (const charge of charges) {
+        list.push({ date, charge });
+      }
+    }
+    return list.sort((a, b) => a.date.localeCompare(b.date));
+  }, [monthChargeMap]);
+
+  const monthTotals = React.useMemo(
+    () => totalsForDay(allMonthCharges.map((item) => item.charge)),
+    [allMonthCharges],
+  );
+
+  const selectedCharges = React.useMemo(
+    () => monthChargeMap.get(selectedIso) ?? [],
+    [monthChargeMap, selectedIso],
+  );
+
+  const goPrevMonth = React.useCallback(() => {
+    setCursor((prev) => shiftMonth(prev, -1));
+  }, []);
+
+  const goNextMonth = React.useCallback(() => {
+    setCursor((prev) => shiftMonth(prev, 1));
+  }, []);
+
+  const goToday = React.useCallback(() => {
+    setCursor(cursorFor(new Date()));
+    setSelectedIso(todayISO());
+  }, []);
+
+  if (status === 'loading' || status === 'idle') {
+    return (
+      <Screen>
+        <LoadingSkeleton cards={3} />
+      </Screen>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <Screen>
+        <ErrorState
+          message={error ?? 'Unable to load calendar.'}
+          onRetry={() => void refreshSubscriptions()}
+        />
+      </Screen>
+    );
+  }
+
+  const weeks: (typeof cells)[] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
+  }
 
   return (
-    <Screen edges={['top']}>
-      {/* Month navigation */}
-      <View className="flex-row items-center justify-between pb-3 pt-4">
-        <Text variant="h3">{monthTitle(cursor)}</Text>
-        <View className="flex-row gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            onPress={() => setCursor((c) => shiftMonth(c, -1))}
-            accessibilityLabel="Previous month"
-          >
-            <Icon as={ChevronLeft} size={20} className="text-foreground" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onPress={() => setCursor((c) => shiftMonth(c, 1))}
-            accessibilityLabel="Next month"
-          >
-            <Icon as={ChevronRight} size={20} className="text-foreground" />
-          </Button>
-        </View>
-      </View>
-
-      {/* Weekday header */}
-      <View className="flex-row pb-1">
-        {WEEKDAYS_MON_FIRST.map((d) => (
-          <Text key={d} variant="small" className="flex-1 text-center font-semibold text-muted-foreground">
-            {d}
+    <Screen className="gap-6">
+      <FadeInView delay={0} className="flex-row flex-wrap items-center justify-between gap-3">
+        <View className="gap-1">
+          <Text className="text-2xl font-semibold tracking-tight text-foreground">
+            Renewal Calendar
           </Text>
-        ))}
-      </View>
-
-      {/* Month grid */}
-      <View className="flex-row flex-wrap">
-        {grid.map((cell) => {
-          const dayCharges = monthCharges.get(cell.dateISO);
-          const hasRenewal = Boolean(dayCharges?.some((c) => c.type === 'renewal'));
-          const hasTrial = Boolean(dayCharges?.some((c) => c.type === 'trial_end'));
-          const selected = cell.dateISO === selectedISO;
-          const dayNum = parseInt(cell.dateISO.slice(8, 10), 10);
-          return (
-            <Pressable
-              key={cell.dateISO}
-              onPress={() => setSelectedISO(cell.dateISO)}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel={
-                `${cell.dateISO}${cell.isToday ? ', today' : ''}` +
-                (dayCharges
-                  ? `, ${dayCharges.length} charge${dayCharges.length === 1 ? '' : 's'}${
-                      hasTrial ? ', includes a trial deadline' : ''
-                    }`
-                  : '')
-              }
-              className={cn(
-                'h-14 w-[14.28%] items-center justify-center gap-1 rounded-md',
-                selected && 'bg-primary',
-                cell.isToday && !selected && 'border border-primary',
-              )}
-            >
-              <Text
-                variant="small"
-                className={cn(
-                  !cell.inCurrentMonth && 'opacity-40',
-                  selected ? 'font-bold text-primary-foreground' : 'text-foreground',
-                )}
-              >
-                {dayNum}
-              </Text>
-              <View className="h-1.5 flex-row gap-1">
-                {hasRenewal ? (
-                  <View
-                    className={cn('h-1.5 w-1.5 rounded-full', selected ? 'bg-primary-foreground' : 'bg-warning')}
-                    accessibilityElementsHidden
-                  />
-                ) : null}
-                {hasTrial ? (
-                  <View
-                    className={cn('h-1.5 w-1.5 rounded-sm rotate-45', selected ? 'bg-primary-foreground' : 'bg-destructive')}
-                    accessibilityElementsHidden
-                  />
-                ) : null}
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Legend */}
-      <View className="flex-row items-center gap-4 pb-2 pt-2">
-        <View className="flex-row items-center gap-1.5">
-          <View className="h-1.5 w-1.5 rounded-full bg-warning" />
-          <Text variant="small" className="text-muted-foreground">
-            Billing date
+          <Text className="text-sm text-muted-foreground">
+            See every billing date across the month before charges hit your card.
           </Text>
         </View>
-        <View className="flex-row items-center gap-1.5">
-          <View className="h-1.5 w-1.5 rotate-45 rounded-sm bg-destructive" />
-          <Text variant="small" className="text-muted-foreground">
-            Trial deadline
-          </Text>
-        </View>
-      </View>
+        <Button size="sm" onPress={() => router.push('/subscription/new')}>
+          <Icon as={Plus} size={15} className="text-primary-foreground" />
+          <Text>Add subscription</Text>
+        </Button>
+      </FadeInView>
 
-      <Separator className="my-2" />
-
-      {/* Selected day detail */}
-      <View className="flex-row items-baseline justify-between pb-2">
-        <Text variant="large">Charges on {selectedISO}</Text>
-        {selectedTotals.length > 0 ? <CurrencyTotalsText totals={selectedTotals} variant="small" /> : null}
-      </View>
-      {selectedCharges.length === 0 ? (
-        <EmptyState
-          title="Nothing scheduled"
-          description="No renewals or trial deadlines on this day. Select a highlighted date to see its charges."
-          className="py-8"
-        />
+      {liveSubs.length === 0 ? (
+        <FadeInView delay={60}>
+          <EmptyState
+            icon={CalendarDays}
+            title="Your calendar is empty"
+            description="Add subscriptions to visualize upcoming billing dates across the month."
+            actionLabel="Add subscription"
+            onAction={() => router.push('/subscription/new')}
+          />
+        </FadeInView>
       ) : (
-        <View className="gap-2 pb-6">
-          {selectedCharges.map((charge) => (
-            <Card key={`${charge.subscriptionId}-${charge.type}`} className="overflow-hidden">
-              <Pressable
-                className="flex-row items-center gap-3 p-3.5 active:bg-accent/40"
-                onPress={() => router.push(`/subscription/${charge.subscriptionId}`)}
-                accessibilityRole="button"
-                accessibilityLabel={`${charge.name}, ${charge.type === 'trial_end' ? 'trial expires' : 'renews'}`}
-              >
-                <CategoryIcon category={subscriptions.find((s) => s.id === charge.subscriptionId)?.category ?? 'other'} size={36} />
-                <View className="flex-1">
-                  <Text className="font-semibold">{charge.name}</Text>
-                  <Text variant="small" className="text-muted-foreground">
-                    {charge.type === 'trial_end' ? 'Free trial ends — first charge may follow' : 'Scheduled renewal'}
-                  </Text>
-                </View>
-                <View className="items-end gap-1">
-                  <MoneyText amountCents={charge.amountCents} currency={charge.currency} variant="small" />
-                  <Badge
-                    variant={charge.type === 'trial_end' ? 'destructive' : 'warning'}
-                    label={charge.type === 'trial_end' ? 'Trial' : 'Renewal'}
-                  />
-                </View>
-              </Pressable>
+        <FadeInView delay={60} className="gap-4 lg:flex-row lg:items-start">
+          {/* Calendar Grid Card */}
+          <Card className="flex-1 py-5">
+            <CardHeader className="px-5">
+              <CardTitle className="text-base">{monthTitle(cursor)}</CardTitle>
+              <CardDescription>
+                {allMonthCharges.length} scheduled event
+                {allMonthCharges.length === 1 ? '' : 's'} · Total{' '}
+                <CurrencyTotalsText
+                  totals={monthTotals}
+                  placeholder="$0.00"
+                  className="text-xs font-semibold text-foreground"
+                />
+              </CardDescription>
+              <CardAction className="right-5">
+                <ButtonGroup>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onPress={goPrevMonth}
+                    accessibilityLabel="Previous month"
+                  >
+                    <Icon as={ChevronLeft} size={15} className="text-foreground" />
+                  </Button>
+                  <Button variant="outline" size="sm" onPress={goToday}>
+                    <Text>Today</Text>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onPress={goNextMonth}
+                    accessibilityLabel="Next month"
+                  >
+                    <Icon as={ChevronRight} size={15} className="text-foreground" />
+                  </Button>
+                </ButtonGroup>
+              </CardAction>
+            </CardHeader>
+
+            <CardContent className="gap-2 px-5">
+              <View className="flex-row pb-1">
+                {WEEKDAY_LABELS.map((w) => (
+                  <View key={w} className="flex-1 items-center">
+                    <Text className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {w}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <View className="gap-1.5">
+                {weeks.map((week, wIdx) => (
+                  <View key={wIdx} className="flex-row gap-1.5">
+                    {week.map((cell) => {
+                      const isSelected = cell.dateISO === selectedIso;
+                      const dayCharges = monthChargeMap.get(cell.dateISO) ?? [];
+                      const count = dayCharges.length;
+                      const dayNum = parseInt(cell.dateISO.slice(-2), 10);
+                      return (
+                        <Pressable
+                          key={cell.dateISO}
+                          onPress={() => setSelectedIso(cell.dateISO)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${cell.dateISO}, ${count} renewals`}
+                          className={cn(
+                            'min-h-[54px] flex-1 items-center justify-between rounded-lg border p-1.5 web:transition-all web:duration-150',
+                            !cell.inCurrentMonth && 'opacity-35',
+                            isSelected
+                              ? 'border-primary bg-primary text-primary-foreground shadow-xs'
+                              : cell.isToday
+                                ? 'border-foreground/40 bg-accent/60'
+                                : count > 0
+                                  ? 'border-border bg-secondary/50 web:hover:bg-accent'
+                                  : 'border-transparent bg-transparent web:hover:bg-accent/40',
+                          )}
+                        >
+                          <Text
+                            className={cn(
+                              'text-xs font-medium tabular-nums',
+                              isSelected
+                                ? 'font-semibold text-primary-foreground'
+                                : cell.isToday
+                                  ? 'font-semibold text-foreground'
+                                  : 'text-foreground',
+                            )}
+                          >
+                            {dayNum}
+                          </Text>
+
+                          {count > 0 ? (
+                            <View className="flex-row items-center gap-0.5">
+                              {dayCharges.slice(0, 3).map((ch, idx) => (
+                                <View
+                                  key={`${ch.subscriptionId}-${idx}`}
+                                  className={cn(
+                                    'h-1.5 w-1.5 rounded-full',
+                                    isSelected ? 'bg-primary-foreground' : 'bg-primary',
+                                  )}
+                                />
+                              ))}
+                              {count > 3 ? (
+                                <Text
+                                  className={cn(
+                                    'text-[9px] font-semibold',
+                                    isSelected
+                                      ? 'text-primary-foreground'
+                                      : 'text-muted-foreground',
+                                  )}
+                                >
+                                  +{count - 3}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ) : (
+                            <View className="h-1.5" />
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            </CardContent>
+          </Card>
+
+          {/* Right Column: Selected Day + Month Schedule */}
+          <View className="gap-4 lg:w-[360px]">
+            <Card className="py-5">
+              <CardHeader className="px-5">
+                <CardTitle className="text-base">
+                  {formatDisplayDate(selectedIso)}
+                </CardTitle>
+                <CardDescription>
+                  {selectedCharges.length > 0
+                    ? `${selectedCharges.length} event${selectedCharges.length === 1 ? '' : 's'} scheduled`
+                    : 'No charges scheduled on this date'}
+                </CardDescription>
+                {selectedCharges.length > 0 ? (
+                  <CardAction className="right-5">
+                    <Badge variant="default">
+                      <Text>{selectedCharges.length}</Text>
+                    </Badge>
+                  </CardAction>
+                ) : null}
+              </CardHeader>
+              <CardContent className="px-5">
+                {selectedCharges.length > 0 ? (
+                  <ItemGroup className="gap-2">
+                    {selectedCharges.map((ch) => (
+                      <Pressable
+                        key={`${ch.subscriptionId}-${ch.type}`}
+                        onPress={() => router.push(`/subscription/${ch.subscriptionId}`)}
+                      >
+                        <Item variant="outline" size="sm" className="bg-card">
+                          <ItemContent>
+                            <ItemTitle>{ch.name}</ItemTitle>
+                            <ItemDescription>
+                              {ch.type === 'trial_end' ? 'Trial ends' : 'Renewal charge'}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            <MoneyText
+                              amountCents={ch.amountCents}
+                              currency={ch.currency}
+                              className="text-sm font-semibold text-foreground"
+                            />
+                          </ItemActions>
+                        </Item>
+                      </Pressable>
+                    ))}
+                  </ItemGroup>
+                ) : (
+                  <View className="items-center rounded-lg border border-dashed border-border py-6">
+                    <Text className="text-xs text-muted-foreground">
+                      Select a highlighted date on the calendar to inspect its renewals.
+                    </Text>
+                  </View>
+                )}
+              </CardContent>
             </Card>
-          ))}
-        </View>
+
+            {allMonthCharges.length > 0 ? (
+              <Card className="py-5">
+                <CardHeader className="px-5">
+                  <CardTitle className="text-base">
+                    All in {monthTitle(cursor)}
+                  </CardTitle>
+                  <CardDescription>
+                    Chronological list of charges this month.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="px-5">
+                  <ItemGroup className="gap-2">
+                    {allMonthCharges.map(({ date, charge }) => (
+                      <Pressable
+                        key={`${charge.subscriptionId}-${date}-${charge.type}`}
+                        onPress={() => router.push(`/subscription/${charge.subscriptionId}`)}
+                      >
+                        <Item variant="outline" size="sm" className="bg-card">
+                          <ItemContent>
+                            <ItemTitle>{charge.name}</ItemTitle>
+                            <ItemDescription>
+                              {formatDisplayDate(date)} ·{' '}
+                              {charge.type === 'trial_end' ? 'Trial ends' : 'Renewal'}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            <MoneyText
+                              amountCents={charge.amountCents}
+                              currency={charge.currency}
+                              className="text-sm font-semibold text-foreground"
+                            />
+                          </ItemActions>
+                        </Item>
+                      </Pressable>
+                    ))}
+                  </ItemGroup>
+                </CardContent>
+              </Card>
+            ) : null}
+          </View>
+        </FadeInView>
       )}
     </Screen>
   );

@@ -11,17 +11,23 @@ function Checkbox({
   return (
     <CheckboxPrimitive.Root
       role="checkbox"
+      data-slot="checkbox"
+      data-state={props.checked ? 'checked' : 'unchecked'}
+      dataSet={{ slot: 'checkbox', state: props.checked ? 'checked' : 'unchecked' }}
       accessibilityState={{ checked: props.checked, disabled: props.disabled }}
       className={cn(
-        'h-5 w-5 native:h-[20] native:w-[20] items-center justify-center rounded-[6px] border border-primary',
-        props.checked && 'bg-primary',
-        props.disabled && 'opacity-50',
+        'peer h-4 w-4 native:h-[18] native:w-[18] shrink-0 items-center justify-center rounded-[4px] border border-input shadow-xs web:transition-shadow web:outline-none web:focus-visible:border-ring web:focus-visible:ring-[3px] web:focus-visible:ring-ring/50 dark:bg-input/30',
+        props.checked && 'border-primary bg-primary text-primary-foreground dark:bg-primary',
+        props.disabled && 'opacity-50 web:cursor-not-allowed',
         className,
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator>
-        <Icon as={Check} size={14} className="text-primary-foreground" />
+      <CheckboxPrimitive.Indicator
+        data-slot="checkbox-indicator"
+        className="items-center justify-center text-current"
+      >
+        <Icon as={Check} size={13} strokeWidth={2.75} className="text-primary-foreground" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

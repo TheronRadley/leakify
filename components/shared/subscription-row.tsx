@@ -1,77 +1,151 @@
 import { CategoryIcon } from '@/components/shared/category-icon';
 import { MoneyText } from '@/components/shared/money';
 import { Badge } from '@/components/ui/badge';
+import { Icon } from '@/components/ui/icon';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item';
+import { LivePulseDot, ScaleOnPress } from '@/components/ui/motion';
 import { Text } from '@/components/ui/text';
-import { intervalLabel } from '@/lib/billing';
-import { relativeDayLabel, todayISO } from '@/lib/dates';
+import { intervalLabel, latestPriceChange } from '@/lib/billing';
+import { categoryLabel } from '@/lib/constants';
+import { formatMoney } from '@/lib/currency';
+import { daysBetween, relativeDayLabel, todayISO } from '@/lib/dates';
 import { cn } from '@/lib/utils';
-import { Link } from 'expo-router';
-import * as React from 'react';
-import { Pressable, View } from 'react-native';
 import type { Subscription } from '@/types';
-
-const STATUS_LABEL: Record<Subscription['status'], string> = {
-  active: 'Active',
-  trialing: 'Trial',
-  paused: 'Paused',
-  canceled: 'Canceled',
-};
-
-const STATUS_VARIANT: Record<Subscription['status'], 'secondary' | 'success' | 'warning' | 'outline'> = {
-  active: 'success',
-  trialing: 'warning',
-  paused: 'secondary',
-  canceled: 'outline',
-};
+import { useRouter } from 'expo-router';
+import { ChevronRight } from 'lucide-react-native';
+import * as React from 'react';
+import { View } from 'react-native';
 
 export interface SubscriptionRowProps {
   subscription: Subscription;
-  /** Emphasize the next billing date (Home upcoming list). */
-  showNextCharge?: boolean;
-  /** Caller-controlled "today" ISO override for predictable labels. */
-  refISO?: string;
-  testID?: string;
+  onPress?: () => void;
+  showCategory?: boolean;
+  rightSubtext?: string;
+  className?: string;
 }
 
-/** One row in any subscription list. Tapping opens the detail screen. */
+const STATUS_BADGE: Record<
+  Subscription['status'],
+  { label: string; variant: 'default' | 'secondary' | 'outline' | 'warning' | 'destructive' }
+> = {
+  active: { label: 'Active', variant: 'secondary' },
+  trialing: { label: 'Trial', variant: 'warning' },
+  paused: { label: 'Paused', variant: 'outline' },
+  canceled: { label: 'Canceled', variant: 'outline' },
+};
+
 export function SubscriptionRow({
-  subscription: sub,
-  showNextCharge = false,
-  refISO,
-  testID,
+  subscription,
+  onPress,
+  showCategory = true,
+  rightSubtext,
+  className,
 }: SubscriptionRowProps) {
-  const today = refISO ?? todayISO();
-  const nextLabel = sub.nextBillingDate ? relativeDayLabel(sub.nextBillingDate, today) : 'No date';
+  const router = useRouter();
+  const today = todayISO();
+  const days = subscription.nextBillingDate
+    ? daysBetween(today, subscription.nextBillingDate)
+    : null;
+  const rel = subscription.nextBillingDate
+    ? relativeDayLabel(subscription.nextBillingDate, today)
+    : null;
+  const priceChange = latestPriceChange(subscription);
+
+  const urgent =
+    (subscription.status === 'active' || subscription.status === 'trialing') &&
+    days !== null &&
+    days >= 0 &&
+    days <= 3;
+
+  const handlePress = React.useCallback(() => {
+    if (onPress) {
+      onPress();
+    } else {
+      router.push(`/subscription/${subscription.id}`);
+    }
+  }, [onPress, router, subscription.id]);
+
+  const statusMeta = STATUS_BADGE[subscription.status];
+
   return (
-    <Link href={`/subscription/${sub.id}`} asChild>
-      <Pressable
-        testID={testID ?? `subscription-row-${sub.id}`}
-        accessibilityRole="button"
-        accessibilityLabel={`${sub.name}, ${STATUS_LABEL[sub.status]}, next charge ${nextLabel ?? 'unknown'}`}
+    <ScaleOnPress
+      scaleTo={0.99}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`${subscription.name}, ${formatMoney(subscription.amountCents, subscription.currency)} ${intervalLabel(subscription.interval)}`}
+    >
+      <Item
+        variant="outline"
+        size="sm"
         className={cn(
-          'flex-row items-center gap-3 rounded-lg border border-border bg-card p-3.5 active:bg-accent/40',
-          sub.archivedAt ? 'opacity-60' : undefined,
+          'bg-card shadow-2xs web:transition-all web:duration-200 web:hover:border-foreground/20 web:hover:bg-accent/40 active:bg-accent/60',
+          urgent && 'border-warning/40',
+          subscription.status === 'canceled' && 'opacity-65',
+          className,
         )}
       >
-        <CategoryIcon category={sub.category} size={40} />
-        <View className="flex-1 gap-0.5">
-          <Text className="font-semibold" numberOfLines={1}>
-            {sub.name}
-          </Text>
-          <Text variant="small" className="text-muted-foreground" numberOfLines={1}>
-            {showNextCharge
-              ? nextLabel
-                ? `${nextLabel} · ${intervalLabel(sub.interval)}`
-                : `${intervalLabel(sub.interval)}`
-              : `${intervalLabel(sub.interval)}`}
-            {sub.paymentMethodLabel ? ` · ${sub.paymentMethodLabel}` : ''}
-          </Text>
-        </View>
-        <View className="items-end gap-1.5">
-          <MoneyText amountCents={sub.amountCents} currency={sub.currency} variant="small" />
-          <Badge variant={STATUS_VARIANT[sub.status]} label={STATUS_LABEL[sub.status]} />
-        </View>
-      </Pressable>
-    </Link>
+        <ItemMedia>
+          <CategoryIcon category={subscription.category} size={38} />
+        </ItemMedia>
+
+        <ItemContent>
+          <View className="flex-row flex-wrap items-center gap-1.5">
+            <ItemTitle numberOfLines={1} className="shrink font-semibold">
+              {subscription.name}
+            </ItemTitle>
+            {subscription.status !== 'active' ? (
+              <Badge variant={statusMeta.variant}>
+                <Text>{statusMeta.label}</Text>
+              </Badge>
+            ) : null}
+            {subscription.flaggedUnused ? (
+              <Badge variant="outline">
+                <Text>Unused?</Text>
+              </Badge>
+            ) : null}
+            {priceChange && priceChange.toCents > priceChange.fromCents ? (
+              <Badge variant="warning">
+                <Text>Price up</Text>
+              </Badge>
+            ) : null}
+          </View>
+
+          <View className="flex-row items-center gap-1.5">
+            {urgent ? <LivePulseDot tone="warning" size={6} /> : null}
+            <ItemDescription
+              numberOfLines={1}
+              className={cn(urgent && 'font-medium text-warning')}
+            >
+              {showCategory ? categoryLabel(subscription.category) : ''}
+              {rel ? `${showCategory ? ' · ' : ''}Due ${rel.toLowerCase()}` : ''}
+              {subscription.paymentMethodLabel
+                ? ` · ${subscription.paymentMethodLabel}`
+                : ''}
+            </ItemDescription>
+          </View>
+        </ItemContent>
+
+        <ItemActions className="gap-2.5">
+          <View className="items-end gap-0.5">
+            <MoneyText
+              amountCents={subscription.amountCents}
+              currency={subscription.currency}
+              className="text-sm font-semibold text-foreground"
+            />
+            <Text className="text-[11px] text-muted-foreground">
+              {rightSubtext ?? intervalLabel(subscription.interval)}
+            </Text>
+          </View>
+          <Icon as={ChevronRight} size={15} className="text-muted-foreground/60" />
+        </ItemActions>
+      </Item>
+    </ScaleOnPress>
   );
 }
