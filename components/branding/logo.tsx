@@ -1,8 +1,8 @@
+import { Text } from '@/components/ui/text';
 import { useSemanticColors } from '@/lib/theme';
 import * as React from 'react';
 import { View } from 'react-native';
 import Svg, { ClipPath, Defs, G, Path, Rect } from 'react-native-svg';
-import { Text } from '@/components/ui/text';
 
 /**
  * Leakify mark: a droplet (the money that leaks away) with a contained
@@ -12,7 +12,7 @@ import { Text } from '@/components/ui/text';
 export function LeakifyMark({
   size = 32,
   color,
-  waveColor = '#FFFFFF',
+  waveColor,
 }: {
   size?: number;
   color?: string;
@@ -20,6 +20,7 @@ export function LeakifyMark({
 }) {
   const colors = useSemanticColors();
   const drop = color ?? colors.primary;
+  const wave = waveColor ?? colors.primaryForeground;
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48" accessibilityLabel="Leakify logo">
       <Defs>
@@ -36,8 +37,8 @@ export function LeakifyMark({
       <G clipPath="url(#dropClip)">
         <Path
           d="M4 28c4-2 8-2 12 0s8 2 12 0 8-2 12 0v18H4z"
-          fill={waveColor}
-          opacity={0.9}
+          fill={wave}
+          opacity={0.92}
         />
         <Rect x="4" y="42" width="40" height="4" rx="2" fill={drop} opacity={0.22} />
       </G>
@@ -45,13 +46,33 @@ export function LeakifyMark({
   );
 }
 
-/** Full lockup: mark + wordmark for onboarding and headers. */
-export function LeakifyLogo({ size = 40, showWordmark = true }: { size?: number; showWordmark?: boolean }) {
-  if (!showWordmark) return <LeakifyMark size={size} />;
+/** Full lockup: shadcn-inspired square emblem + crisp tracking-tight wordmark. */
+export function LeakifyLogo({ size = 36, showWordmark = true }: { size?: number; showWordmark?: boolean }) {
+  const colors = useSemanticColors();
+  const boxSize = Math.round(size * 0.9);
+  const markSize = Math.round(size * 0.62);
+
+  const badge = (
+    <View
+      style={{ width: boxSize, height: boxSize }}
+      className="items-center justify-center rounded-lg border border-border/50 bg-primary shadow-sm"
+    >
+      <LeakifyMark
+        size={markSize}
+        color={colors.primaryForeground}
+        waveColor={colors.primary}
+      />
+    </View>
+  );
+
+  if (!showWordmark) return badge;
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.25 }}>
-      <LeakifyMark size={size} />
-      <Text style={{ fontSize: size * 0.55, lineHeight: size * 0.62 }} className="font-extrabold text-foreground">
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Math.round(size * 0.25) }}>
+      {badge}
+      <Text
+        style={{ fontSize: Math.round(size * 0.52), lineHeight: Math.round(size * 0.6) }}
+        className="font-bold tracking-tight text-foreground"
+      >
         Leakify
       </Text>
     </View>

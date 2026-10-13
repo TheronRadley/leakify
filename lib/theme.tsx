@@ -1,7 +1,7 @@
 /**
  * Theme management. Wraps NativeWind's color scheme handling with a persisted
  * user preference (system / light / dark) and exposes resolved scheme +
- * brand-semantic colors for places that need raw values (icons, tab bar).
+ * shadcn/ui Zinc semantic colors for places that need raw values (icons, tab bar).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useColorScheme as useNativeWindColorScheme } from 'nativewind';
@@ -60,29 +60,33 @@ export function useAppTheme(): ThemeContextValue {
   return useContext(ThemeContext);
 }
 
-/** Semantic colors for imperative APIs that cannot consume CSS variables. */
+/** Semantic colors (shadcn/ui Zinc palette) for imperative APIs that cannot consume CSS variables. */
 export const SEMANTIC_COLORS = {
   light: {
-    background: '#F8FAFC',
+    background: '#FFFFFF',
     card: '#FFFFFF',
-    foreground: '#101828',
-    muted: '#667085',
-    border: '#E4E7EC',
-    primary: '#16A34A',
-    warning: '#F59E0B',
-    destructive: '#DC2626',
-    navy: '#101828',
+    foreground: '#09090B',
+    muted: '#71717A',
+    border: '#E4E4E7',
+    primary: '#18181B',
+    primaryForeground: '#FAFAFA',
+    secondary: '#F4F4F5',
+    warning: '#D97706',
+    destructive: '#E11D48',
+    navy: '#09090B',
   },
   dark: {
-    background: '#0B1424',
-    card: '#141F31',
-    foreground: '#F2F5F7',
-    muted: '#9AA7B8',
-    border: '#243042',
-    primary: '#22C55E',
-    warning: '#FBBF24',
+    background: '#09090B',
+    card: '#18181B',
+    foreground: '#FAFAFA',
+    muted: '#A1A1AA',
+    border: '#27272A',
+    primary: '#FAFAFA',
+    primaryForeground: '#18181B',
+    secondary: '#27272A',
+    warning: '#F59E0B',
     destructive: '#F87171',
-    navy: '#0B1424',
+    navy: '#09090B',
   },
 } as const;
 

@@ -1,13 +1,30 @@
 import { LeakifyMark } from '@/components/branding/logo';
 import { MoneyText } from '@/components/shared/money';
 import { Screen } from '@/components/shared/screen';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Icon } from '@/components/ui/icon';
-import { Separator } from '@/components/ui/separator';
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item';
+import { FadeInView } from '@/components/ui/motion';
 import { Text } from '@/components/ui/text';
 import { useAuth } from '@/features/auth/auth-context';
 import { requestPermissions } from '@/features/notifications/service';
+import { APP_TAGLINE } from '@/lib/constants';
 import { isSupabaseConfigured } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import {
@@ -21,15 +38,16 @@ import {
 } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { APP_TAGLINE } from '@/lib/constants';
 
 function PagerDots({ index, count }: { index: number; count: number }) {
   return (
-    <View className="flex-row items-center justify-center gap-2 py-4" accessibilityElementsHidden>
+    <View className="flex-row items-center justify-center gap-2 py-3" accessibilityElementsHidden>
       {Array.from({ length: count }, (_, i) => (
         <View
           key={i}
-          className={i === index ? 'h-2 w-6 rounded-full bg-primary' : 'h-2 w-2 rounded-full bg-border'}
+          className={
+            i === index ? 'h-2 w-6 rounded-full bg-primary' : 'h-2 w-2 rounded-full bg-border'
+          }
         />
       ))}
     </View>
@@ -41,12 +59,14 @@ export default function OnboardingScreen() {
   const { completeOnboarding, enterDemoMode, enterLocalMode } = useAuth();
   const [step, setStep] = React.useState(0);
   const [busy, setBusy] = React.useState<'demo' | 'local' | null>(null);
-  const [notifyChoice, setNotifyChoice] = React.useState<'pending' | 'enabled' | 'skipped'>('pending');
+  const [notifyChoice, setNotifyChoice] = React.useState<'pending' | 'enabled' | 'skipped'>(
+    'pending',
+  );
   const scrollRef = React.useRef<ScrollView>(null);
 
   const goTo = (next: number) => {
     setStep(next);
-    scrollRef.current?.scrollTo({ x: 0, animated: false });
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
   const startDemo = async () => {
@@ -75,59 +95,105 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <Screen scroll={false} className="bg-background" edges={['top', 'bottom']}>
-      <ScrollView ref={scrollRef} className="flex-1" contentContainerClassName="grow" scrollEnabled>
+    <Screen scroll={false} padded={false} className="bg-background" edges={['top', 'bottom']}>
+      <ScrollView
+        ref={scrollRef}
+        className="flex-1"
+        showsVerticalScrollIndicator={false}
+        contentContainerClassName="mx-auto w-full max-w-lg grow justify-center px-4 py-6"
+      >
         {step === 0 ? (
-          <View className="flex-1 items-center justify-center gap-5 px-8">
-            <LeakifyMark size={96} />
-            <Text variant="h2" className="text-center">
+          <FadeInView key="step-0" className="items-center justify-center gap-4">
+            <LeakifyMark size={68} />
+            <Badge variant="outline">
+              <Text>Subscription Intelligence</Text>
+            </Badge>
+            <Text variant="h2" className="text-center font-semibold tracking-tight">
               Stop the money leaks.
             </Text>
-            <Text variant="lead" className="text-center leading-7">
+            <Text variant="lead" className="text-center text-sm leading-6 text-muted-foreground">
               {`${APP_TAGLINE} Track every subscription in one place and get reminded before a renewal or free trial charges you.`}
             </Text>
-            <View className="w-full gap-3 pt-4">
+            <ItemGroup className="w-full gap-2.5 pt-2">
               {[
-                { icon: CalendarClock, text: 'See every upcoming charge before it happens' },
-                { icon: BellRing, text: 'Reminders 7, 3, 1 days before — you choose' },
-                { icon: ShieldCheck, text: 'Your data stays yours. No bank passwords, ever' },
+                {
+                  icon: CalendarClock,
+                  title: 'Upcoming charge visibility',
+                  text: 'See every upcoming charge before it happens',
+                },
+                {
+                  icon: BellRing,
+                  title: 'Customizable lead times',
+                  text: 'Reminders 7, 3, 1 days before — you choose',
+                },
+                {
+                  icon: ShieldCheck,
+                  title: 'Private by design',
+                  text: 'Your data stays yours. No bank passwords, ever',
+                },
               ].map((row) => (
-                <View key={row.text} className="flex-row items-center gap-3">
-                  <View className="rounded-full bg-accent p-2">
-                    <Icon as={row.icon} size={18} className="text-accent-foreground" />
-                  </View>
-                  <Text className="flex-1 text-muted-foreground">{row.text}</Text>
-                </View>
+                <Item
+                  key={row.title}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-lg bg-card"
+                >
+                  <ItemMedia variant="icon">
+                    <Icon as={row.icon} size={15} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>{row.title}</ItemTitle>
+                    <ItemDescription className="text-xs">{row.text}</ItemDescription>
+                  </ItemContent>
+                </Item>
               ))}
-            </View>
-          </View>
+            </ItemGroup>
+          </FadeInView>
         ) : null}
 
         {step === 1 ? (
-          <View className="flex-1 justify-center gap-5 px-8">
-            <Text variant="h3" className="text-center">
+          <FadeInView key="step-1" className="justify-center gap-5">
+            <Text variant="h3" className="text-center font-semibold tracking-tight">
               Small charges add up fast
             </Text>
-            <Card className="items-center gap-1 p-6">
-              <Text variant="muted" className="text-center">
-                Illustrative monthly total tracked by a typical household
-              </Text>
-              <MoneyText amountCents={12741} currency="USD" variant="h1" className="text-foreground" />
-              <Text variant="muted" className="text-center">
-                ≈ <MoneyText amountCents={152892} currency="USD" variant="small" className="inline" /> projected per year
-              </Text>
+            <Card className="items-center gap-2">
+              <CardHeader className="items-center pb-0">
+                <CardDescription className="text-center">
+                  Illustrative monthly total tracked by a typical household
+                </CardDescription>
+                <CardTitle className="text-3xl font-semibold tabular-nums">
+                  <MoneyText
+                    amountCents={12741}
+                    currency="USD"
+                    variant="h1"
+                    className="text-foreground"
+                  />
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="items-center">
+                <Text variant="muted" className="text-center text-xs">
+                  ≈{' '}
+                  <MoneyText
+                    amountCents={152892}
+                    currency="USD"
+                    variant="small"
+                    className="inline"
+                  />{' '}
+                  projected per year
+                </Text>
+              </CardContent>
             </Card>
-            <Text className="text-center leading-6 text-muted-foreground">
+            <Text className="text-center text-sm leading-6 text-muted-foreground">
               These figures are an example, not your data. When you add your own subscriptions,
-              advance reminders give you time to cancel renewals you no longer want — before
-              they charge you.
+              advance reminders give you time to cancel renewals you no longer want — before they
+              charge you.
             </Text>
-          </View>
+          </FadeInView>
         ) : null}
 
         {step === 2 ? (
-          <View className="flex-1 justify-center gap-4 px-8">
-            <Text variant="h3" className="pb-2 text-center">
+          <FadeInView key="step-2" className="justify-center gap-3.5">
+            <Text variant="h3" className="pb-1 text-center font-semibold tracking-tight">
               How do you want to start?
             </Text>
             <ChoiceCard
@@ -163,69 +229,89 @@ export default function OnboardingScreen() {
             />
             <View className="flex-row items-center gap-2 px-1">
               <Icon as={Database} size={14} className="text-muted-foreground" />
-              <Text variant="small" className="flex-1 text-muted-foreground">
+              <Text variant="small" className="flex-1 text-xs text-muted-foreground">
                 You can switch modes later in Settings.
               </Text>
             </View>
-          </View>
+          </FadeInView>
         ) : null}
 
         {step === 3 ? (
-          <View className="flex-1 justify-center gap-5 px-8">
-            <View className="items-center gap-3">
-              <View className="rounded-full bg-accent p-5">
-                <Icon as={BellRing} size={36} className="text-accent-foreground" />
-              </View>
-              <Text variant="h3" className="text-center">
-                Never get surprised by a charge
-              </Text>
-              <Text className="text-center leading-6 text-muted-foreground">
-                Leakify schedules on-device reminders before renewals and trial deadlines —
-                like “Your Netflix renewal is coming up in 3 days”. No servers involved.
-              </Text>
-            </View>
-            {notifyChoice === 'pending' ? (
-              <View className="gap-3">
-                <Button
-                  onPress={async () => {
-                    const result = await requestPermissions();
-                    setNotifyChoice(result === 'granted' ? 'enabled' : 'skipped');
-                  }}
-                  accessibilityLabel="Enable notifications"
-                >
-                  <Text>Enable reminders</Text>
-                </Button>
-                <Button variant="ghost" onPress={() => setNotifyChoice('skipped')} accessibilityLabel="Skip notifications for now">
-                  <Text className="text-muted-foreground">Not now</Text>
-                </Button>
-              </View>
-            ) : (
-              <View className="items-center gap-2">
-                <Text className="text-center text-muted-foreground">
-                  {notifyChoice === 'enabled'
-                    ? 'Reminders are on. You can fine-tune lead times in Settings.'
-                    : 'No problem — you can enable Notifications anytime from your device Settings.'}
-                </Text>
-              </View>
-            )}
-          </View>
+          <FadeInView key="step-3" className="justify-center gap-5">
+            <Card className="items-center gap-4">
+              <CardHeader className="items-center pb-0">
+                <View className="mb-2 h-12 w-12 items-center justify-center rounded-lg border border-border bg-muted">
+                  <Icon as={BellRing} size={22} className="text-foreground" />
+                </View>
+                <CardTitle className="text-center text-lg">
+                  Never get surprised by a charge
+                </CardTitle>
+                <CardDescription className="text-center">
+                  Leakify schedules on-device reminders before renewals and trial deadlines — like
+                  “Your Netflix renewal is coming up in 3 days”. No servers involved.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="w-full">
+                {notifyChoice === 'pending' ? (
+                  <View className="gap-2.5">
+                    <Button
+                      onPress={async () => {
+                        const result = await requestPermissions();
+                        setNotifyChoice(result === 'granted' ? 'enabled' : 'skipped');
+                      }}
+                      accessibilityLabel="Enable notifications"
+                      className="w-full"
+                    >
+                      <Text>Enable reminders</Text>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onPress={() => setNotifyChoice('skipped')}
+                      accessibilityLabel="Skip notifications for now"
+                      className="w-full"
+                    >
+                      <Text className="text-muted-foreground">Not now</Text>
+                    </Button>
+                  </View>
+                ) : (
+                  <Text className="text-center text-sm text-muted-foreground">
+                    {notifyChoice === 'enabled'
+                      ? 'Reminders are on. You can fine-tune lead times in Settings.'
+                      : 'No problem — you can enable Notifications anytime from your device Settings.'}
+                  </Text>
+                )}
+              </CardContent>
+            </Card>
+          </FadeInView>
         ) : null}
       </ScrollView>
 
-      <PagerDots index={step} count={4} />
-      <View className="gap-2 px-8 pb-2">
+      <View className="mx-auto w-full max-w-lg gap-2 border-t border-border/60 bg-background px-4 pt-1 pb-3">
+        <PagerDots index={step} count={4} />
         {step < 3 ? (
-          <Button onPress={() => goTo(step + 1)} accessibilityLabel={step === 0 ? 'Get started' : 'Continue'}>
+          <Button
+            onPress={() => goTo(step + 1)}
+            accessibilityLabel={step === 0 ? 'Get started' : 'Continue'}
+            className="w-full"
+          >
             <Text>{step === 0 ? 'Get Started' : 'Continue'}</Text>
           </Button>
         ) : notifyChoice !== 'pending' ? (
-          <Button onPress={() => void finish()} accessibilityLabel="Finish onboarding">
+          <Button
+            onPress={() => void finish()}
+            accessibilityLabel="Finish onboarding"
+            className="w-full"
+          >
             <Text>Choose how to start using Leakify</Text>
           </Button>
         ) : null}
         {step === 0 ? (
-          <Pressable onPress={() => void finish()} accessibilityRole="button" accessibilityLabel="Skip onboarding">
-            <Text variant="muted" className="py-2 text-center">
+          <Pressable
+            onPress={() => void finish()}
+            accessibilityRole="button"
+            accessibilityLabel="Skip onboarding"
+          >
+            <Text variant="muted" className="py-1.5 text-center text-xs">
               Skip
             </Text>
           </Pressable>
@@ -253,20 +339,28 @@ function ChoiceCard({
   onPress: () => void;
 }) {
   return (
-    <Card className="gap-3 p-4">
-      <View className="flex-row items-center gap-3">
-        <View className="rounded-lg bg-accent p-2">
-          <Icon as={icon} size={20} className="text-accent-foreground" />
+    <Card className="gap-3 py-4">
+      <CardHeader className="pb-0">
+        <View className="flex-row items-center gap-2.5">
+          <View className="h-8 w-8 items-center justify-center rounded-md border border-border bg-muted">
+            <Icon as={icon} size={16} className="text-foreground" />
+          </View>
+          <CardTitle className="flex-1 text-sm">{title}</CardTitle>
         </View>
-        <Text className="flex-1 font-semibold">{title}</Text>
-      </View>
-      <Text variant="small" className="leading-5 text-muted-foreground">
-        {description}
-      </Text>
-      <Separator />
-      <Button size="sm" variant={disabled ? 'secondary' : 'default'} loading={loading} disabled={disabled} onPress={onPress}>
-        <Text>{actionLabel}</Text>
-      </Button>
+        <CardDescription className="text-xs leading-5">{description}</CardDescription>
+      </CardHeader>
+      <CardFooter className="border-t border-border pt-3">
+        <Button
+          size="sm"
+          variant={disabled ? 'secondary' : 'default'}
+          loading={loading}
+          disabled={disabled}
+          onPress={onPress}
+          className="w-full"
+        >
+          <Text>{actionLabel}</Text>
+        </Button>
+      </CardFooter>
     </Card>
   );
 }

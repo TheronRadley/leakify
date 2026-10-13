@@ -6,21 +6,21 @@ import { cn } from '@/lib/utils';
 
 const TextClassContext = React.createContext<string | undefined>(undefined);
 
-const textVariants = cva('text-foreground', {
+const textVariants = cva('text-foreground web:select-text', {
   variants: {
     variant: {
-      default: 'text-base',
-      h1: 'text-4xl font-extrabold tracking-tight',
-      h2: 'text-3xl font-bold tracking-tight',
-      h3: 'text-2xl font-semibold tracking-tight',
-      h4: 'text-xl font-semibold',
-      p: 'text-base leading-7',
-      blockquote: 'mt-4 border-l-2 border-border pl-4 italic',
-      code: 'rounded-md bg-muted px-1 py-0.5 font-mono text-sm',
-      lead: 'text-xl text-muted-foreground',
-      large: 'text-lg font-semibold',
-      small: 'text-sm font-medium leading-none',
-      muted: 'text-sm text-muted-foreground',
+      default: 'text-sm leading-5',
+      h1: 'text-3xl font-bold tracking-tight sm:text-4xl',
+      h2: 'text-2xl font-semibold tracking-tight',
+      h3: 'text-xl font-semibold tracking-tight',
+      h4: 'text-base font-semibold tracking-tight',
+      p: 'text-sm leading-6',
+      blockquote: 'mt-4 border-l-2 border-border pl-4 italic text-muted-foreground',
+      code: 'rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-medium text-foreground',
+      lead: 'text-base text-muted-foreground leading-6',
+      large: 'text-base font-semibold tracking-tight',
+      small: 'text-xs font-medium leading-4',
+      muted: 'text-xs text-muted-foreground leading-5',
     },
   },
   defaultVariants: { variant: 'default' },

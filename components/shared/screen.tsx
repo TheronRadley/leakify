@@ -1,22 +1,30 @@
 import { cn } from '@/lib/utils';
 import * as React from 'react';
-import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, View, type ViewProps } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  View,
+  type ViewProps,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ScreenProps extends ViewProps {
   children: React.ReactNode;
   /** Wrap content in a ScrollView (default true). */
   scroll?: boolean;
-  /** Standard 16px horizontal padding (default true). */
+  /** Standard horizontal padding (default true). */
   padded?: boolean;
   refreshing?: boolean;
   onRefresh?: () => void;
   /** Extra content fixed below the scroll area, inside the safe area. */
   footer?: React.ReactNode;
   edges?: ('top' | 'bottom')[];
+  contentContainerClassName?: string;
 }
 
-/** Standard screen container with safe-area handling across all app screens. */
+/** Standard screen container with centered max-width and safe-area handling across all app screens. */
 export function Screen({
   children,
   scroll = true,
@@ -24,8 +32,9 @@ export function Screen({
   refreshing,
   onRefresh,
   footer,
-  edges = ['top'],
+  edges = [],
   className,
+  contentContainerClassName,
   ...props
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
@@ -37,11 +46,17 @@ export function Screen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-background"
     >
-      <View className={cn('flex-1', className)} style={[{ paddingTop: topPad }]} {...props}>
+      <View className="flex-1" style={[{ paddingTop: topPad }]} {...props}>
         {scroll ? (
           <ScrollView
             className="flex-1"
-            contentContainerClassName={cn(padded && 'px-4 pb-8')}
+            showsVerticalScrollIndicator={false}
+            contentContainerClassName={cn(
+              'mx-auto w-full max-w-5xl flex-col gap-5',
+              padded && 'px-4 pt-4 pb-12 md:px-6 md:pt-6',
+              className,
+              contentContainerClassName,
+            )}
             keyboardShouldPersistTaps="handled"
             refreshControl={
               onRefresh ? (
@@ -52,10 +67,22 @@ export function Screen({
             {children}
           </ScrollView>
         ) : (
-          <View className={cn('flex-1', padded && 'px-4 pb-8')}>{children}</View>
+          <View
+            className={cn(
+              'mx-auto w-full max-w-5xl flex-1 flex-col gap-5',
+              padded && 'px-4 pt-4 pb-8 md:px-6 md:pt-6',
+              className,
+              contentContainerClassName,
+            )}
+          >
+            {children}
+          </View>
         )}
         {footer ? (
-          <View style={{ paddingBottom: Math.max(bottomPad, 12) }} className="px-4">
+          <View
+            style={{ paddingBottom: Math.max(bottomPad, 12) }}
+            className="mx-auto w-full max-w-5xl px-4 md:px-6"
+          >
             {footer}
           </View>
         ) : null}

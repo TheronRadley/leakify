@@ -2,55 +2,109 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Official shadcn/ui v4 Zinc + Vibrant Chart theme tokens (HSL channels for Tailwind v3/NativeWind v4).
+ * Reference: https://ui.shadcn.com/docs/installation/manual
+ */
 @layer base {
   :root {
-    /* Leakify light theme — clean background, white cards, midnight-navy text */
-    --background: 210 40% 98%; /* #F8FAFC */
-    --foreground: 220 43% 11%; /* #101828 */
-    --card: 0 0% 100%; /* #FFFFFF */
-    --card-foreground: 220 43% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 43% 11%;
-    --primary: 142 76% 36%; /* #16A34A */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 94%; /* #EEF2F6-ish */
-    --secondary-foreground: 220 43% 11%;
-    --muted: 216 20% 95%;
-    --muted-foreground: 221 13% 46%; /* #667085 */
-    --accent: 142 76% 94%;
-    --accent-foreground: 142 72% 24%;
-    --destructive: 0 72% 51%; /* #DC2626 */
-    --destructive-foreground: 0 0% 100%;
-    --warning: 38 92% 50%; /* #F59E0B */
-    --warning-foreground: 24 64% 16%;
-    --border: 218 17% 91%; /* #E4E7EC */
-    --input: 218 17% 91%;
-    --ring: 142 76% 36%;
     --radius: 0.625rem;
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 160 84% 39%;
+    --chart-3: 262 83% 58%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 346 77% 50%;
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 240 5% 64.9%;
   }
 
   .dark {
-    /* Leakify dark theme — deep midnight navy surfaces */
-    --background: 218 53% 9%; /* #0B1424 */
-    --foreground: 204 24% 96%; /* #F2F5F7 */
-    --card: 217 42% 14%; /* #141F31 */
-    --card-foreground: 204 24% 96%;
-    --popover: 217 42% 14%;
-    --popover-foreground: 204 24% 96%;
-    --primary: 142 71% 45%; /* #22C55E */
-    --primary-foreground: 150 60% 8%;
-    --secondary: 219 29% 18%; /* #20293A */
-    --secondary-foreground: 204 24% 96%;
-    --muted: 219 29% 18%;
-    --muted-foreground: 214 17% 66%; /* #9AA7B8 */
-    --accent: 216 41% 22%;
-    --accent-foreground: 204 24% 96%;
-    --destructive: 0 63% 50%;
-    --destructive-foreground: 0 0% 100%;
-    --warning: 43 96% 56%; /* #FBBF24 */
-    --warning-foreground: 32 81% 12%;
-    --border: 216 29% 20%; /* #243042 */
-    --input: 216 29% 20%;
-    --ring: 142 71% 45%;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 6.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 6.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72.2% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 240 10% 3.9%;
+    --success: 142 70% 45%;
+    --success-foreground: 240 10% 3.9%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 160 84% 45%;
+    --chart-3: 263 70% 65%;
+    --chart-4: 43 96% 56%;
+    --chart-5: 346 84% 61%;
+    --sidebar: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 240 4.9% 83.9%;
+  }
+}
+
+@keyframes shadcn-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes shadcn-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

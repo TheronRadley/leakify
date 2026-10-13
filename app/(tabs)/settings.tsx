@@ -10,607 +10,352 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Icon } from '@/components/ui/icon';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Icon } from '@/components/ui/icon';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from '@/components/ui/item';
+import { FadeInView } from '@/components/ui/motion';
 import { Text } from '@/components/ui/text';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useAuth } from '@/features/auth/auth-context';
-import { getPermissionStatus, requestPermissions } from '@/features/notifications/service';
-import { ImportDialog } from '@/features/subscriptions/components/import-dialog';
-import { buildExportPayload } from '@/features/subscriptions/import-export';
 import {
   deleteAllAccountData,
   resetDemoData,
-  updateNotificationSettings,
-  updateProfile,
   useDataStore,
 } from '@/features/subscriptions/store';
-import { RENEWAL_LEAD_OPTIONS, SUPPORTED_CURRENCIES, TRIAL_LEAD_OPTIONS } from '@/lib/constants';
-import { useAppTheme, type ThemePreference } from '@/lib/theme';
-import { cn } from '@/lib/utils';
+import { useAppTheme } from '@/lib/theme';
+import { isSupabaseConfigured } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import {
-  BellRing,
+  Bell,
   ChevronRight,
-  CircleDollarSign,
-  FlaskConical,
-  HelpCircle,
+  Database,
+  LogIn,
   LogOut,
-  Palette,
-  ShieldCheck,
+  Moon,
+  PiggyBank,
+  Shield,
+  Sparkles,
+  Sun,
   Trash2,
-  Upload,
 } from 'lucide-react-native';
 import * as React from 'react';
-import { Linking, Pressable, Share, View } from 'react-native';
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View className="pt-6">
-      <Text variant="small" className="pb-2 font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </Text>
-      <Card>{children}</Card>
-    </View>
-  );
-}
-
-function Row({
-  icon,
-  title,
-  description,
-  right,
-  onPress,
-  destructive,
-  accessibilityLabel,
-}: {
-  icon?: Parameters<typeof Icon>[0]['as'];
-  title: string;
-  description?: string;
-  right?: React.ReactNode;
-  onPress?: () => void;
-  destructive?: boolean;
-  accessibilityLabel?: string;
-}) {
-  const content = (
-    <View className="flex-row items-center gap-3 p-4">
-      {icon ? (
-        <Icon as={icon} size={20} className={destructive ? 'text-destructive' : 'text-muted-foreground'} />
-      ) : null}
-      <View className="flex-1">
-        <Text className={cn('font-medium', destructive && 'text-destructive')}>{title}</Text>
-        {description ? (
-          <Text variant="small" className="leading-4 text-muted-foreground">
-            {description}
-          </Text>
-        ) : null}
-      </View>
-      {right ?? (onPress ? <Icon as={ChevronRight} size={18} className="text-muted-foreground" /> : null)}
-    </View>
-  );
-  if (!onPress) return content;
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} className="active:bg-accent/50">
-      {content}
-    </Pressable>
-  );
-}
-
-const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: 'Match system' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
+import { Pressable, View } from 'react-native';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const auth = useAuth();
-  const { profile, subscriptions, notificationSettings, isDemo } = useDataStore();
-  const { preference, setPreference } = useAppTheme();
-  const [permission, setPermission] = React.useState<'granted' | 'denied' | 'undetermined'>('undetermined');
+  const { user, signOut, enterDemoMode, dataMode } = useAuth();
+  const { subscriptions, profile, isDemo } = useDataStore();
+  const { colorScheme, setPreference } = useAppTheme();
   const [busy, setBusy] = React.useState(false);
-  const [feedback, setFeedback] = React.useState<string | null>(null);
-  const [deletionWarning, setDeletionWarning] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    void getPermissionStatus().then(setPermission);
+  const initials = React.useMemo(() => {
+    const src = profile?.displayName || user?.email || 'G';
+    return src
+      .split(/\s+/)
+      .map((s) => s[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  }, [profile?.displayName, user?.email]);
+
+  const handleSeed = React.useCallback(async () => {
+    setBusy(true);
+    try {
+      if (isDemo || dataMode === 'demo') {
+        await resetDemoData();
+      } else {
+        await enterDemoMode();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [dataMode, enterDemoMode, isDemo]);
+
+  const handleClear = React.useCallback(async () => {
+    setBusy(true);
+    try {
+      await deleteAllAccountData();
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
-  const toggleLead = async (list: number[], days: number, key: 'renewalLeadDays' | 'trialLeadDays') => {
-    const next = list.includes(days) ? list.filter((d) => d !== days) : [...list, days].sort((a, b) => b - a);
-    await updateNotificationSettings({ [key]: next });
-  };
-
-  const exportData = async () => {
-    setBusy(true);
-    setFeedback(null);
-    try {
-      // Same builder the restore path reads, so the round trip cannot drift.
-      const payload = buildExportPayload(profile, subscriptions);
-      await Share.share({
-        message: JSON.stringify(payload, null, 2),
-        title: 'Leakify data export',
-      });
-    } catch {
-      setFeedback('Export failed. Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /**
-   * Deletion is reported, not assumed. If the server-side account removal did
-   * not run, we stay on this screen with the reason visible instead of signing
-   * out into a screen the user cannot read any more.
-   */
-  const handleDeleteAccount = async () => {
-    setBusy(true);
-    setFeedback(null);
-    try {
-      const result = await deleteAllAccountData();
-      if (!result.accountDeleted || !result.rowsDeleted) {
-        setDeletionWarning(
-          result.warning ??
-            'Some of your data could not be removed. Please try again, or contact support@leakify.app.',
-        );
-        return;
-      }
-      await auth.signOut();
-      router.replace('/(auth)/sign-in');
-    } catch {
-      setDeletionWarning('Deletion failed. Please try again, or contact support@leakify.app.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleResetDemo = async () => {
-    setBusy(true);
-    try {
-      await resetDemoData();
-      setFeedback('Demo data was refreshed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const switchMode = async () => {
-    await auth.signOut();
-    router.replace('/onboarding');
-  };
-
   return (
-    <Screen edges={['top']}>
-      <Text variant="h3" className="pt-4">
-        Settings
-      </Text>
+    <Screen className="gap-6">
+      <FadeInView delay={0} className="gap-1">
+        <Text className="text-2xl font-semibold tracking-tight text-foreground">
+          Settings
+        </Text>
+        <Text className="text-sm text-muted-foreground">
+          Account profile, appearance preferences, reminders, and local data controls.
+        </Text>
+      </FadeInView>
 
-      {/* Profile & account */}
-      <Section title="Profile & account">
-        <Row
-          icon={ShieldCheck}
-          title={profile?.displayName ?? 'Leakify user'}
-          description={
-            auth.user?.email ??
-            (isDemo ? 'Demo mode — sample data only' : 'Local mode — data stays on this device')
-          }
-        />
-        <Separator />
-        <ProfileEditor />
-        <Separator />
-        <View className="flex-row items-center justify-between p-4">
-          <View className="flex-row items-center gap-3">
-            <Icon as={CircleDollarSign} size={20} className="text-muted-foreground" />
-            <View>
-              <Text className="font-medium">Preferred currency</Text>
-              <Text variant="small" className="text-muted-foreground">
-                Display default only — amounts in other currencies are never converted.
+      {/* Account Card */}
+      <FadeInView delay={50}>
+        <Card className="py-5">
+          <CardHeader className="px-5">
+            <CardTitle className="text-base">Account</CardTitle>
+            <CardDescription>
+              {user
+                ? 'Signed in to your Leakify workspace.'
+                : 'Using local guest workspace on this device.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-5">
+            <View className="flex-row items-center gap-3">
+              <Avatar alt={user?.email ?? 'Guest'} size="lg">
+                <AvatarFallback>
+                  <Text className="text-sm font-semibold text-foreground">{initials}</Text>
+                </AvatarFallback>
+              </Avatar>
+              <View className="flex-1 gap-0.5">
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-sm font-semibold text-foreground">
+                    {user ? profile?.displayName || user.email : 'Guest Workspace'}
+                  </Text>
+                  <Badge variant={user ? 'success' : 'secondary'}>
+                    <Text>
+                      {user
+                        ? isSupabaseConfigured
+                          ? 'Cloud Synced'
+                          : 'Local Account'
+                        : isDemo
+                          ? 'Sample Mode'
+                          : 'Offline Mode'}
+                    </Text>
+                  </Badge>
+                </View>
+                <Text className="text-xs text-muted-foreground">
+                  {user
+                    ? user.email
+                    : 'Sign in or create an account to organize your subscriptions under your profile.'}
+                </Text>
+              </View>
+            </View>
+          </CardContent>
+          <CardFooter className="gap-2 border-t border-border px-5 pt-4">
+            {user ? (
+              <Button variant="outline" size="sm" onPress={() => void signOut()}>
+                <Icon as={LogOut} size={14} className="text-foreground" />
+                <Text>Sign out</Text>
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" onPress={() => router.push('/(auth)/sign-in')}>
+                  <Icon as={LogIn} size={14} className="text-primary-foreground" />
+                  <Text>Sign in</Text>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onPress={() => router.push('/(auth)/sign-up')}
+                >
+                  <Text>Create account</Text>
+                </Button>
+              </>
+            )}
+          </CardFooter>
+        </Card>
+      </FadeInView>
+
+      {/* Appearance Card */}
+      <FadeInView delay={100}>
+        <Card className="py-5">
+          <CardHeader className="px-5">
+            <CardTitle className="text-base">Appearance</CardTitle>
+            <CardDescription>
+              Switch between light and dark theme tokens.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex-row flex-wrap items-center justify-between gap-3 px-5">
+            <View className="gap-0.5">
+              <Text className="text-sm font-medium text-foreground">Color Theme</Text>
+              <Text className="text-xs text-muted-foreground">
+                Currently active: {colorScheme === 'dark' ? 'Dark' : 'Light'}
               </Text>
             </View>
-          </View>
-        </View>
-        <View className="px-4 pb-4">
-          <Select
-            value={{
-              value: profile?.preferredCurrency ?? 'USD',
-              label: profile?.preferredCurrency ?? 'USD',
-            }}
-            onValueChange={async (option) => {
-              if (option?.value) await updateProfile({ preferredCurrency: option.value });
-            }}
-          >
-            <SelectTrigger accessibilityLabel="Preferred currency">
-              <SelectValue placeholder="Currency" />
-            </SelectTrigger>
-            <SelectContent>
-              {SUPPORTED_CURRENCIES.map((c) => (
-                <SelectItem key={c.code} value={c.code} label={`${c.code} — ${c.name}`}>
-                  {`${c.code} — ${c.name}`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </View>
-        <Separator />
-        <Row
-          icon={Palette}
-          title="Theme"
-          right={
-            <View className="w-40">
-              <Select
-                value={THEME_OPTIONS.find((o) => o.value === preference)!}
-                onValueChange={(option) => option && setPreference(option.value as ThemePreference)}
-              >
-                <SelectTrigger accessibilityLabel="Theme preference">
-                  <SelectValue placeholder="Theme" />
-                </SelectTrigger>
-                <SelectContent>
-                  {THEME_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value} label={o.label}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </View>
-          }
-        />
-      </Section>
-
-      {/* Notifications */}
-      <Section title="Reminders & notifications">
-        <Row
-          icon={BellRing}
-          title="Notification permission"
-          description={
-            permission === 'granted'
-              ? 'Granted — reminders will be delivered.'
-              : permission === 'denied'
-                ? 'Blocked. Enable notifications for Leakify in your device settings to get reminders.'
-                : 'Not requested yet.'
-          }
-          right={
-            permission === 'undetermined' ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onPress={async () => {
-                  const result = await requestPermissions();
-                  setPermission(result);
-                }}
-                accessibilityLabel="Allow notifications"
-              >
-                <Text>Allow</Text>
-              </Button>
-            ) : undefined
-          }
-          onPress={permission === 'denied' ? () => void Linking.openSettings() : undefined}
-        />
-        <Separator />
-        <View className="gap-2 p-4">
-          <Text className="font-medium">Remind me before renewals</Text>
-          <View className="gap-2.5 pt-1">
-            {RENEWAL_LEAD_OPTIONS.map((days) => (
-              <View key={days} className="flex-row items-center gap-3">
-                <Checkbox
-                  checked={notificationSettings.renewalLeadDays.includes(days)}
-                  onCheckedChange={() => void toggleLead(notificationSettings.renewalLeadDays, days, 'renewalLeadDays')}
-                  accessibilityLabel={`Renewal reminder ${days === 0 ? 'on billing day' : `${days} days before`}`}
-                />
-                <Label onPress={() => void toggleLead(notificationSettings.renewalLeadDays, days, 'renewalLeadDays')}>
-                  {days === 0 ? 'On the billing day' : `${days} day${days === 1 ? '' : 's'} before`}
-                </Label>
-              </View>
-            ))}
-          </View>
-        </View>
-        <Separator />
-        <View className="gap-2 p-4">
-          <Text className="font-medium">Free trial deadlines</Text>
-          <View className="gap-2.5 pt-1">
-            {TRIAL_LEAD_OPTIONS.map((days) => (
-              <View key={days} className="flex-row items-center gap-3">
-                <Checkbox
-                  checked={notificationSettings.trialLeadDays.includes(days)}
-                  onCheckedChange={() => void toggleLead(notificationSettings.trialLeadDays, days, 'trialLeadDays')}
-                  accessibilityLabel={`Trial reminder ${days === 0 ? 'on expiry day' : `${days} days before`}`}
-                />
-                <Label onPress={() => void toggleLead(notificationSettings.trialLeadDays, days, 'trialLeadDays')}>
-                  {days === 0 ? 'On the day it ends' : `${days} day${days === 1 ? '' : 's'} before it ends`}
-                </Label>
-              </View>
-            ))}
-          </View>
-        </View>
-        <Separator />
-        <View className="flex-row items-center justify-between p-4">
-          <View className="flex-1 pr-3">
-            <Text className="font-medium">Weekly digest</Text>
-            <Text variant="small" className="text-muted-foreground">
-              “You have N subscription payments scheduled this week.”
-            </Text>
-          </View>
-          <Switch
-            checked={notificationSettings.weeklyDigestEnabled}
-            onCheckedChange={(checked) => void updateNotificationSettings({ weeklyDigestEnabled: checked })}
-            accessibilityLabel="Weekly digest"
-          />
-        </View>
-        <Separator />
-        <View className="flex-row items-center justify-between p-4">
-          <View className="flex-1 pr-3">
-            <Text className="font-medium">Hide details on the lock screen</Text>
-            <Text variant="small" className="text-muted-foreground">
-              Notify “A subscription bills today” instead of the name and amount, so
-              reminders stay private on a shared or locked device.
-            </Text>
-          </View>
-          <Switch
-            checked={notificationSettings.genericLockScreenText}
-            onCheckedChange={(checked) => void updateNotificationSettings({ genericLockScreenText: checked })}
-            accessibilityLabel="Hide subscription details in notifications"
-          />
-        </View>
-      </Section>
-
-      {/* Appearance preview note + demo */}
-      {isDemo ? (
-        <Section title="Demo mode">
-          <Row
-            icon={FlaskConical}
-            title="Refresh demo data"
-            description="Clears demo edits and re-seeds the sample account."
-            onPress={() => void handleResetDemo()}
-          />
-          <Separator />
-          <Row
-            icon={Trash2}
-            title="Leave demo & start fresh"
-            description="Switch to your own on-device data."
-            onPress={() => void switchMode()}
-          />
-        </Section>
-      ) : null}
-
-      {/* Data & privacy */}
-      <Section title="Data & privacy">
-        <Row
-          icon={Upload}
-          title="Export my data"
-          description={busy ? 'Preparing export…' : 'Share a JSON copy of your profile and subscriptions.'}
-          onPress={() => void exportData()}
-        />
-        <Separator />
-        <ImportDialog onDone={setFeedback} />
-        <Separator />
-        <Row
-          icon={ShieldCheck}
-          title="Privacy at Leakify"
-          description="What is stored where, and why."
-          onPress={() => router.push('/privacy')}
-        />
-        <Separator />
-        <Row
-          icon={HelpCircle}
-          title="Help & feedback"
-          description="Report a bug or request a feature."
-          onPress={() => void Linking.openURL('mailto:support@leakify.app?subject=Leakify%20feedback')}
-        />
-      </Section>
-
-      {/* Danger zone */}
-      <Section title="Account">
-        {auth.user ? (
-          <>
-            <Row
-              icon={LogOut}
-              title="Sign out"
-              description="Your synced data stays on the server."
-              onPress={() => {
-                void auth.signOut().then(() => router.replace('/(auth)/sign-in'));
-              }}
-            />
-            <Separator />
-          </>
-        ) : (
-          <>
-            <Row
-              icon={LogOut}
-              title={isDemo ? 'Exit demo' : 'Switch mode'}
-              description="Choose a different way to use Leakify."
-              onPress={() => void switchMode()}
-            />
-            <Separator />
-          </>
-        )}
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Pressable accessibilityRole="button" accessibilityLabel="Delete all my data" className="active:bg-destructive/10">
-              <View className="flex-row items-center gap-3 p-4">
-                <Icon as={Trash2} size={20} className="text-destructive" />
-                <View className="flex-1">
-                  <Text className="font-medium text-destructive">Delete all my data</Text>
-                  <Text variant="small" className="text-muted-foreground">
-                    Removes subscriptions, settings and profile{auth.user ? ' from this device and the server' : ' from this device'}.
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete all data?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This permanently removes your subscriptions, billing history, preferences and
-                profile. Any scheduled reminders are cancelled. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>
-                <Text>Keep my data</Text>
-              </AlertDialogCancel>
-              <AlertDialogAction onPress={() => void handleDeleteAccount()}>
-                <Text>Delete everything</Text>
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </Section>
-
-      {deletionWarning ? (
-        <Card className="mt-6 gap-3 border-destructive/40 bg-destructive/10 p-4">
-          <Text className="font-medium text-destructive">Deletion incomplete</Text>
-          <Text variant="small" className="leading-5 text-foreground" accessibilityRole="alert">
-            {deletionWarning}
-          </Text>
-          <View className="flex-row gap-2">
-            <Button size="sm" variant="outline" loading={busy} onPress={() => void handleDeleteAccount()}>
-              <Text>Try again</Text>
-            </Button>
-            <Button
+            <ToggleGroup
+              type="single"
+              variant="outline"
               size="sm"
-              variant="ghost"
-              onPress={() => {
-                void auth.signOut().then(() => router.replace('/(auth)/sign-in'));
+              value={colorScheme === 'dark' ? 'dark' : 'light'}
+              onValueChange={(val) => {
+                if (val === 'light' || val === 'dark') {
+                  setPreference(val);
+                }
               }}
             >
-              <Text className="text-muted-foreground">Sign out anyway</Text>
-            </Button>
-          </View>
+              <ToggleGroupItem value="light" accessibilityLabel="Light mode">
+                <Icon as={Sun} size={14} className="text-foreground" />
+                <Text>Light</Text>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="dark" accessibilityLabel="Dark mode">
+                <Icon as={Moon} size={14} className="text-foreground" />
+                <Text>Dark</Text>
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </CardContent>
         </Card>
-      ) : null}
+      </FadeInView>
 
-      {feedback ? (
-        <Text variant="small" className="pt-3 text-center text-primary" accessibilityLiveRegion="polite">
-          {feedback}
-        </Text>
-      ) : null}
+      {/* Workspace Tools (shadcn ItemGroup) */}
+      <FadeInView delay={150}>
+        <Card className="py-5">
+          <CardHeader className="px-5">
+            <CardTitle className="text-base">Features & Guides</CardTitle>
+            <CardDescription>
+              Renewal reminders, savings insights, and privacy documentation.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-5">
+            <ItemGroup className="rounded-lg border border-border">
+              <Pressable onPress={() => router.push('/reminders')} accessibilityRole="button">
+                <Item size="sm" className="web:hover:bg-accent/50">
+                  <ItemMedia variant="icon">
+                    <Icon as={Bell} size={16} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Renewal Reminders</ItemTitle>
+                    <ItemDescription>
+                      Configure notification lead times and inspect scheduled alerts
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Icon as={ChevronRight} size={15} className="text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </Pressable>
 
-      <Text variant="small" className="pb-10 pt-8 text-center text-muted-foreground">
-        Leakify 1.0.0 — privacy-first subscription tracking.
-      </Text>
-      <View className="h-6" />
+              <ItemSeparator />
+
+              <Pressable onPress={() => router.push('/savings')} accessibilityRole="button">
+                <Item size="sm" className="web:hover:bg-accent/50">
+                  <ItemMedia variant="icon">
+                    <Icon as={PiggyBank} size={16} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Savings Audit</ItemTitle>
+                    <ItemDescription>
+                      Inspect duplicate categories, trial expirations, and cancellation candidates
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Icon as={ChevronRight} size={15} className="text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </Pressable>
+
+              <ItemSeparator />
+
+              <Pressable onPress={() => router.push('/onboarding')} accessibilityRole="button">
+                <Item size="sm" className="web:hover:bg-accent/50">
+                  <ItemMedia variant="icon">
+                    <Icon as={Sparkles} size={16} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Product Tour</ItemTitle>
+                    <ItemDescription>
+                      Replay the Leakify onboarding walkthrough
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Icon as={ChevronRight} size={15} className="text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </Pressable>
+
+              <ItemSeparator />
+
+              <Pressable onPress={() => router.push('/privacy')} accessibilityRole="button">
+                <Item size="sm" className="web:hover:bg-accent/50">
+                  <ItemMedia variant="icon">
+                    <Icon as={Shield} size={16} className="text-foreground" />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>Privacy & Security</ItemTitle>
+                    <ItemDescription>
+                      How your subscription data is stored and protected
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Icon as={ChevronRight} size={15} className="text-muted-foreground" />
+                  </ItemActions>
+                </Item>
+              </Pressable>
+            </ItemGroup>
+          </CardContent>
+        </Card>
+      </FadeInView>
+
+      {/* Data Management Card */}
+      <FadeInView delay={200}>
+        <Card className="py-5">
+          <CardHeader className="px-5">
+            <CardTitle className="text-base">Data Management</CardTitle>
+            <CardDescription>
+              Populate sample subscriptions or reset your local workspace ({subscriptions.length}{' '}
+              tracked).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex-row flex-wrap items-center gap-2.5 px-5">
+            <Button variant="outline" size="sm" loading={busy} onPress={() => void handleSeed()}>
+              <Icon as={Database} size={14} className="text-foreground" />
+              <Text>Load sample subscriptions</Text>
+            </Button>
+
+            {subscriptions.length > 0 ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm" disabled={busy}>
+                    <Icon as={Trash2} size={14} className="text-white" />
+                    <Text>Clear all data</Text>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete all subscriptions?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes all {subscriptions.length} tracked subscriptions and
+                      cancels their scheduled reminders. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>
+                      <Text>Cancel</Text>
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onPress={() => void handleClear()}
+                    >
+                      <Text>Delete everything</Text>
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
+          </CardContent>
+        </Card>
+      </FadeInView>
     </Screen>
   );
 }
-
-const LOCALE_OPTIONS = ['en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'pt-BR', 'it-IT', 'ja-JP'];
-const TIMEZONE_OPTIONS = [
-  'UTC',
-  'Europe/London',
-  'Europe/Berlin',
-  'Europe/Paris',
-  'Europe/Madrid',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'America/Sao_Paulo',
-  'Africa/Algiers',
-  'Asia/Dubai',
-  'Asia/Kolkata',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-];
-
-/** Display name, locale and timezone editing (used by formatting + reminders). */
-function ProfileEditor() {
-  const { profile } = useDataStore();
-  const [name, setName] = React.useState(profile?.displayName ?? '');
-  const [saving, setSaving] = React.useState(false);
-  const [saved, setSaved] = React.useState(false);
-
-  // Resync the input when the store profile refreshes (render-phase adjust pattern).
-  const [prevProfileName, setPrevProfileName] = React.useState(profile?.displayName ?? '');
-  const currentProfileName = profile?.displayName ?? '';
-  if (prevProfileName !== currentProfileName) {
-    setPrevProfileName(currentProfileName);
-    setName(currentProfileName);
-  }
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await updateProfile({ displayName: name.trim() || 'Leakify User' });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <View className="gap-3 p-4">
-      <Text className="font-medium">Profile details</Text>
-      <View className="flex-row items-center gap-2">
-        <Input
-          value={name}
-          onChangeText={setName}
-          placeholder="Display name"
-          className="flex-1"
-          accessibilityLabel="Display name"
-        />
-        <Button size="sm" variant="outline" loading={saving} onPress={() => void save()} accessibilityLabel="Save display name">
-          <Text>{saved ? 'Saved ✓' : 'Save'}</Text>
-        </Button>
-      </View>
-      <View className="flex-row gap-2">
-        <View className="flex-1">
-          <Select
-            value={{ value: profile?.locale ?? 'en-US', label: profile?.locale ?? 'en-US' }}
-            onValueChange={async (option) => {
-              if (option?.value) await updateProfile({ locale: option.value });
-            }}
-          >
-            <SelectTrigger accessibilityLabel="Locale">
-              <SelectValue placeholder="Locale" />
-            </SelectTrigger>
-            <SelectContent>
-              {LOCALE_OPTIONS.map((l) => (
-                <SelectItem key={l} value={l} label={l}>
-                  {l}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </View>
-        <View className="flex-[1.6]">
-          <Select
-            value={{ value: profile?.timezone ?? 'UTC', label: profile?.timezone ?? 'UTC' }}
-            onValueChange={async (option) => {
-              if (option?.value) await updateProfile({ timezone: option.value });
-            }}
-          >
-            <SelectTrigger accessibilityLabel="Timezone">
-              <SelectValue placeholder="Timezone" />
-            </SelectTrigger>
-            <SelectContent>
-              {TIMEZONE_OPTIONS.map((tz) => (
-                <SelectItem key={tz} value={tz} label={tz}>
-                  {tz}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </View>
-      </View>
-      <Text variant="small" className="leading-4 text-muted-foreground">
-        Reminder times and date labels follow your device timezone; these preferences tune
-        display formatting.
-      </Text>
-    </View>
-  );
-}
-

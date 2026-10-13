@@ -1,10 +1,15 @@
-import { Label } from '@/components/ui/label';
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from '@/components/ui/field';
 import { Text } from '@/components/ui/text';
 import { cn } from '@/lib/utils';
 import * as React from 'react';
 import { View } from 'react-native';
 
-/** Labeled form field wrapper with inline validation messaging. */
+/** Labeled form field wrapper built on shadcn/ui `Field`, `FieldLabel`, `FieldDescription`, and `FieldError`. */
 export function FormField({
   label,
   error,
@@ -21,25 +26,24 @@ export function FormField({
   className?: string;
 }) {
   return (
-    <View className={cn('gap-1.5', className)} accessibilityLiveRegion={error ? 'polite' : 'none'}>
+    <Field
+      className={cn('gap-1.5', className)}
+      accessibilityLiveRegion={error ? 'polite' : 'none'}
+    >
       <View className="flex-row items-baseline justify-between">
-        <Label>{label}</Label>
+        <FieldLabel>{label}</FieldLabel>
         {optional ? (
-          <Text variant="small" className="text-muted-foreground">
+          <Text variant="small" className="text-xs text-muted-foreground">
             Optional
           </Text>
         ) : null}
       </View>
       {children}
       {error ? (
-        <Text variant="small" className="text-destructive" accessibilityRole="alert">
-          {error}
-        </Text>
+        <FieldError errors={[{ message: error }]} />
       ) : hint ? (
-        <Text variant="small" className="text-muted-foreground">
-          {hint}
-        </Text>
+        <FieldDescription className="text-xs">{hint}</FieldDescription>
       ) : null}
-    </View>
+    </Field>
   );
 }

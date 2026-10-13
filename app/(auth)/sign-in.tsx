@@ -1,4 +1,4 @@
-import { LeakifyLogo } from '@/components/branding/logo';
+import { FormField } from '@/components/shared/form-field';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,15 +9,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { FormField } from '@/components/shared/form-field';
-import { Screen } from '@/components/shared/screen';
+import {
+  ErrorBanner,
+  Link as UILink,
+  OrDivider,
+  PasswordInput,
+  Text,
+} from '@/components/ui/auth-bits';
 import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { FieldDescription, FieldGroup } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { Link as UILink, Text } from '@/components/ui/auth-bits';
 import { useAuth } from '@/features/auth/auth-context';
 import { assessModeTransition } from '@/features/subscriptions/mode-transition';
 import { countLocalSubscriptions } from '@/features/subscriptions/store';
-import { APP_TAGLINE } from '@/lib/constants';
 import { signInSchema, type SignInValues } from '@/lib/validation';
 import { isSupabaseConfigured } from '@/services/supabase';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -32,17 +43,15 @@ export default function SignInScreen() {
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
 
-  const { control, handleSubmit, formState: { errors } } = useForm<SignInValues>({
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<SignInValues>({
     resolver: zodResolver(signInSchema),
     defaultValues: { email: '', password: '' },
   });
 
-  /**
-   * Signing in switches the store to the cloud scope. On-device data is not
-   * uploaded and not deleted — it just stops being the thing on screen — so we
-   * say that out loud before it happens instead of letting it look like loss
-   * (audit U-04 / N-03).
-   */
   const [localCount, setLocalCount] = React.useState(0);
   const [pendingSignIn, setPendingSignIn] = React.useState<SignInValues | null>(null);
 
@@ -52,7 +61,7 @@ export default function SignInScreen() {
       .then((count) => {
         if (mounted) setLocalCount(count);
       })
-      .catch(() => undefined); // unreadable local storage must not block sign-in
+      .catch(() => undefined);
     return () => {
       mounted = false;
     };
@@ -106,109 +115,161 @@ export default function SignInScreen() {
   };
 
   return (
-    <Screen edges={['top', 'bottom']}>
-      <View className="items-center gap-2 pb-8 pt-10">
-        <LeakifyLogo size={40} />
-        <Text variant="muted">{APP_TAGLINE}</Text>
-      </View>
-
+    <View className="w-full gap-4">
       {isSupabaseConfigured ? (
-        <View className="gap-4" accessibilityLabel="Sign-in form">
-          <Controller
-            control={control}
-            name="email"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <FormField label="Email" error={errors.email?.message}>
-                <Input
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="you@example.com"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                />
-              </FormField>
-            )}
-          />
-          <Controller
-            control={control}
-            name="password"
-            render={({ field: { onChange, onBlur, value } }) => (
-              <FormField label="Password" error={errors.password?.message}>
-                <Input
-                  value={value}
-                  onChangeText={onChange}
-                  onBlur={onBlur}
-                  placeholder="••••••••"
-                  secureTextEntry
-                  autoComplete="password"
-                  textContentType="password"
-                />
-              </FormField>
-            )}
-          />
-          {serverError ? (
-            <Text variant="small" className="text-destructive" accessibilityRole="alert">
-              {serverError}
-            </Text>
-          ) : null}
-          <Button loading={busy === 'signin'} disabled={busy !== null} onPress={onSubmit} accessibilityLabel="Sign in">
-            <Text>Sign in</Text>
-          </Button>
-          <View className="flex-row justify-center gap-1">
-            <UILink href="/(auth)/recover">Forgot password?</UILink>
-            <Text variant="muted">·</Text>
-            <UILink href="/(auth)/sign-up">Create account</UILink>
-          </View>
+        <Card accessibilityLabel="Sign-in form">
+          <CardHeader className="items-center text-center">
+            <CardTitle className="text-xl">Welcome back</CardTitle>
+            <CardDescription className="text-center">
+              Sign in to sync your subscriptions across devices
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FieldGroup>
+              <ErrorBanner message={serverError} />
 
-          <AlertDialog
-            open={pendingSignIn !== null}
-            onOpenChange={(next) => {
-              if (!next) setPendingSignIn(null);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{advice.headline}</AlertDialogTitle>
-                <AlertDialogDescription>{advice.detail}</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>
-                  <Text>Not now</Text>
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  onPress={() => {
-                    const values = pendingSignIn;
-                    setPendingSignIn(null);
-                    if (values) void performSignIn(values);
-                  }}
+              <Controller
+                control={control}
+                name="email"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <FormField label="Email" error={errors.email?.message}>
+                    <Input
+                      value={value}
+                      onChangeText={onChange}
+                      onBlur={onBlur}
+                      placeholder="you@example.com"
+                      autoCapitalize="none"
+                      autoComplete="email"
+                      keyboardType="email-address"
+                      textContentType="emailAddress"
+                    />
+                  </FormField>
+                )}
+              />
+              <Controller
+                control={control}
+                name="password"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <FormField label="Password" error={errors.password?.message}>
+                    <PasswordInput
+                      value={value}
+                      onChangeText={onChange}
+                      onBlur={onBlur}
+                      placeholder="••••••••"
+                      autoComplete="password"
+                      textContentType="password"
+                    />
+                  </FormField>
+                )}
+              />
+              <Button
+                loading={busy === 'signin'}
+                disabled={busy !== null}
+                onPress={onSubmit}
+                accessibilityLabel="Sign in"
+                className="w-full"
+              >
+                <Text>Sign in</Text>
+              </Button>
+              <View className="flex-row justify-center gap-1.5">
+                <UILink href="/(auth)/recover">Forgot password?</UILink>
+                <Text variant="muted">·</Text>
+                <UILink href="/(auth)/sign-up">Create account</UILink>
+              </View>
+
+              <OrDivider label="Or continue offline" />
+
+              <View className="gap-2">
+                <Button
+                  variant="outline"
+                  onPress={() => void startLocal()}
+                  loading={busy === 'local'}
+                  disabled={busy !== null}
+                  accessibilityLabel="Start without an account"
+                  className="w-full"
                 >
-                  <Text>Continue</Text>
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </View>
+                  <Text>Start without an account</Text>
+                </Button>
+                <Button
+                  variant="secondary"
+                  onPress={() => void startDemo()}
+                  loading={busy === 'demo'}
+                  disabled={busy !== null}
+                  accessibilityLabel="Explore the demo"
+                  className="w-full"
+                >
+                  <Text>Explore the demo</Text>
+                </Button>
+              </View>
+            </FieldGroup>
+
+            <AlertDialog
+              open={pendingSignIn !== null}
+              onOpenChange={(next) => {
+                if (!next) setPendingSignIn(null);
+              }}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{advice.headline}</AlertDialogTitle>
+                  <AlertDialogDescription>{advice.detail}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>
+                    <Text>Not now</Text>
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onPress={() => {
+                      const values = pendingSignIn;
+                      setPendingSignIn(null);
+                      if (values) void performSignIn(values);
+                    }}
+                  >
+                    <Text>Continue</Text>
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </CardContent>
+        </Card>
       ) : (
-        <View className="gap-4 px-1">
-          <Text className="text-center leading-6 text-muted-foreground">
-            This build runs without cloud accounts, so your data stays entirely on this
-            device. Start manually, or explore the demo first.
-          </Text>
-          <Button onPress={() => void startLocal()} loading={busy === 'local'} disabled={busy !== null} accessibilityLabel="Start without an account">
-            <Text>Start without an account</Text>
-          </Button>
-          <Button variant="outline" onPress={() => void startDemo()} loading={busy === 'demo'} disabled={busy !== null} accessibilityLabel="Explore the demo">
-            <Text>Explore the demo</Text>
-          </Button>
-          <Text variant="small" className="text-center text-muted-foreground">
-            To enable sign-in & sync, configure EXPO_PUBLIC_SUPABASE_URL and
-            EXPO_PUBLIC_SUPABASE_ANON_KEY (see README).
-          </Text>
-        </View>
+        <Card>
+          <CardHeader className="items-center text-center">
+            <CardTitle className="text-xl">Local-first workspace</CardTitle>
+            <CardDescription className="text-center">
+              This build runs without cloud accounts, so your data stays entirely on this device.
+              Start manually, or explore the demo first.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FieldGroup className="gap-3">
+              <Button
+                onPress={() => void startLocal()}
+                loading={busy === 'local'}
+                disabled={busy !== null}
+                accessibilityLabel="Start without an account"
+                className="w-full"
+              >
+                <Text>Start without an account</Text>
+              </Button>
+              <Button
+                variant="outline"
+                onPress={() => void startDemo()}
+                loading={busy === 'demo'}
+                disabled={busy !== null}
+                accessibilityLabel="Explore the demo"
+                className="w-full"
+              >
+                <Text>Explore the demo</Text>
+              </Button>
+              <FieldDescription className="text-center text-xs">
+                To enable sign-in & sync, configure EXPO_PUBLIC_SUPABASE_URL and
+                EXPO_PUBLIC_SUPABASE_ANON_KEY (see README).
+              </FieldDescription>
+            </FieldGroup>
+          </CardContent>
+        </Card>
       )}
-    </Screen>
+    </View>
   );
 }

@@ -10,8 +10,9 @@ function Label({
   return (
     <LabelPrimitive.Root className="web:cursor-default" onPress={onPress}>
       <LabelPrimitive.Text
+        data-slot="label"
         className={cn(
-          'text-sm font-medium leading-none text-foreground native:text-base web:peer-disabled:cursor-not-allowed web:peer-disabled:opacity-70',
+          'flex items-center gap-2 text-sm font-medium leading-none text-foreground select-none web:peer-disabled:cursor-not-allowed web:peer-disabled:opacity-50',
           className,
         )}
         {...props}

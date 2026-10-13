@@ -10,6 +10,8 @@ function Separator({
 }: SeparatorPrimitive.RootProps & { ref?: React.Ref<SeparatorPrimitive.RootRef> }) {
   return (
     <SeparatorPrimitive.Root
+      data-slot="separator"
+      data-orientation={orientation}
       decorative={decorative}
       orientation={orientation}
       className={cn(

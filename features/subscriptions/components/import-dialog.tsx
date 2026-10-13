@@ -1,12 +1,9 @@
 /**
- * Restore-from-backup dialog.
- *
- * Two steps on purpose: paste → **Check file** shows exactly what would happen
- * (new / already present / unreadable), and only then can anything be written.
- * The user never has to trust that a paste silently did the right thing, and a
- * failed run leaves the original text in the box so it can be retried.
+ * Restore-from-backup dialog built on shadcn/ui `Dialog`, `Item`, `Textarea`, `Alert`, and `ButtonGroup`.
  */
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +14,13 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Icon } from '@/components/ui/icon';
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@/components/ui/item';
 import { Text } from '@/components/ui/text';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -25,7 +29,7 @@ import {
   type ImportDuplicateStrategy,
 } from '@/features/subscriptions/import-export';
 import { importSubscriptions, useDataStore } from '@/features/subscriptions/store';
-import { Download } from 'lucide-react-native';
+import { AlertCircle, ChevronRight, Download } from 'lucide-react-native';
 import * as React from 'react';
 import { Pressable, View } from 'react-native';
 
@@ -86,17 +90,24 @@ export function ImportDialog({ onDone }: { onDone: (message: string) => void }) 
       }}
     >
       <DialogTrigger asChild>
-        <Pressable accessibilityRole="button" accessibilityLabel="Restore from backup" className="active:bg-accent/50">
-          <View className="flex-row items-center gap-3 p-4">
-            <Icon as={Download} size={20} className="text-muted-foreground" />
-            <View className="flex-1">
-              <Text className="font-medium">Restore from backup</Text>
-              <Text variant="small" className="leading-4 text-muted-foreground">
+        <Item
+          asChild
+          size="sm"
+          className="rounded-none web:hover:bg-accent/40 active:bg-accent/50"
+        >
+          <Pressable accessibilityRole="button" accessibilityLabel="Restore from backup">
+            <ItemMedia variant="icon">
+              <Icon as={Download} size={16} className="text-muted-foreground" />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Restore from backup</ItemTitle>
+              <ItemDescription className="text-xs leading-4">
                 Paste a previous export. You will see what it contains before anything is saved.
-              </Text>
-            </View>
-          </View>
-        </Pressable>
+              </ItemDescription>
+            </ItemContent>
+            <Icon as={ChevronRight} size={16} className="text-muted-foreground" />
+          </Pressable>
+        </Item>
       </DialogTrigger>
       <DialogContent className="gap-3">
         <DialogHeader>
@@ -116,17 +127,17 @@ export function ImportDialog({ onDone }: { onDone: (message: string) => void }) 
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel="Exported JSON"
-          style={{ minHeight: 140 }}
+          className="min-h-36 font-mono text-xs"
         />
 
         {error ? (
-          <Text variant="small" className="text-destructive" accessibilityRole="alert">
-            {error}
-          </Text>
+          <Alert variant="destructive" icon={AlertCircle}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         ) : null}
 
         {preview ? (
-          <View className="gap-2 rounded-md bg-muted p-3">
+          <View className="gap-2 rounded-lg border border-border bg-muted/40 p-3.5">
             <Text variant="small" className="font-semibold">
               {preview.summary}
             </Text>
@@ -141,26 +152,28 @@ export function ImportDialog({ onDone }: { onDone: (message: string) => void }) 
               </Text>
             ) : null}
             {preview.duplicates.length > 0 ? (
-              <View className="flex-row items-center gap-2 pt-1">
+              <View className="flex-row items-center justify-between gap-2 pt-1">
                 <Text variant="small" className="flex-1 text-muted-foreground">
                   For the {preview.duplicates.length} you already have:
                 </Text>
-                <Button
-                  size="sm"
-                  variant={strategy === 'skip' ? 'default' : 'outline'}
-                  onPress={() => setStrategy('skip')}
-                  accessibilityLabel="Keep existing subscriptions"
-                >
-                  <Text>Keep mine</Text>
-                </Button>
-                <Button
-                  size="sm"
-                  variant={strategy === 'replace' ? 'default' : 'outline'}
-                  onPress={() => setStrategy('replace')}
-                  accessibilityLabel="Replace with the imported versions"
-                >
-                  <Text>Use imported</Text>
-                </Button>
+                <ButtonGroup>
+                  <Button
+                    size="xs"
+                    variant={strategy === 'skip' ? 'default' : 'outline'}
+                    onPress={() => setStrategy('skip')}
+                    accessibilityLabel="Keep existing subscriptions"
+                  >
+                    <Text>Keep mine</Text>
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={strategy === 'replace' ? 'default' : 'outline'}
+                    onPress={() => setStrategy('replace')}
+                    accessibilityLabel="Replace with the imported versions"
+                  >
+                    <Text>Use imported</Text>
+                  </Button>
+                </ButtonGroup>
               </View>
             ) : null}
           </View>
